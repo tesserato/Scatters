@@ -16,6 +16,26 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
         _ => "value",
     };
 
+    // Compute y-axis limits from data
+    let (y_min_str, y_max_str) = {
+        let mut min_v = f64::INFINITY;
+        let mut max_v = f64::NEG_INFINITY;
+        for ys in &plot_data.y_series_list {
+            if let Ok(casted) = ys.cast(&DataType::Float64) {
+                let ca = casted.f64().unwrap();
+                if let Some(mn) = ca.min() { if mn.is_finite() { min_v = min_v.min(mn); } }
+                if let Some(mx) = ca.max() { if mx.is_finite() { max_v = max_v.max(mx); } }
+            }
+        }
+        if min_v.is_finite() && max_v.is_finite() {
+            let span = (max_v - min_v).abs();
+            let pad = if span == 0.0 { 1.0 } else { span * 0.05 };
+            (format!("{}", min_v - pad), format!("{}", max_v + pad))
+        } else {
+            (String::from("null"), String::from("null"))
+        }
+    };
+
     // Generate HTML using simple string formatting
     let html_content = format!(r#"<!DOCTYPE html>
 <html>
@@ -41,12 +61,48 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
                 }}
             }},
             xAxis: {{ type: '{}', splitLine: {{ show: false }} }},
-            yAxis: {{ type: 'value', axisLine: {{ show: true }} }},
+            yAxis: {{ type: 'value', axisLine: {{ show: true }}, min: {}, max: {} }},
             dataZoom: [
                 {{ type: 'inside', start: 0, end: 100 }},
                 {{ type: 'slider', start: 0, end: 100, height: 40 }}
             ],
             series: [ {} ]
+        }});
+        // Helper to compute size for visible window
+function computeSize(n, pct) {{
+            pct = Math.max(0, Math.min(1, pct));
+            var visibleN = (pct <= 0) ? 1 : Math.max(1, Math.round(n * pct));
+return Math.max(2, Math.min(18, 14 - Math.log10(visibleN + 1) * 3.5));
+        }}
+
+        // Apply sizes immediately and on zoom
+function applySymbolSizes(pct) {{
+            var opt = myChart.getOption();
+            var series = opt.series || [];
+var newSeries = series.map(function (s) {{
+                var n = (s.metaN != null) ? s.metaN : ((s.data && s.data.length) ? s.data.length : 1000);
+                var size = computeSize(n, pct);
+                // Toggle large mode based on visible points for better styling accuracy when zoomed-in
+                var visibleN = Math.max(1, Math.round(n * pct));
+                var useLarge = visibleN > 5000;
+return {{ symbolSize: size, large: useLarge }};
+}});
+            myChart.setOption({{ series: newSeries }}, false, false);
+        }}
+
+// Initial apply for full view
+        applySymbolSizes(1.0);
+
+        // Adapt symbol sizes to the current zoom window
+myChart.on('dataZoom', function () {{
+            var opt = myChart.getOption();
+            var dzArr = opt.dataZoom || [];
+if (!dzArr.length) {{ return; }}
+            var dz = dzArr[0];
+            var start = (dz.start != null) ? dz.start : 0;
+            var end = (dz.end != null) ? dz.end : 100;
+            var pct = Math.max(0, (end - start) / 100);
+applySymbolSizes(pct);
         }});
     </script>
 </body>
@@ -54,6 +110,8 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
         plot_data.title, 
         plot_data.title, 
         x_axis_type,
+        y_min_str,
+        y_max_str,
         series_json_objects.join(",")
     );
 
@@ -82,17 +140,27 @@ fn build_series_json(plot_data: &PlotData) -> Result<Vec<String>, AppError> {
             .collect();
 
         let data_json = serde_json::to_string(&data_points)?;
+        let n_points = data_points.len();
 
         let series_obj = format!(
             r#"{{
                 name: '{}',
                 type: 'scatter',
-                symbolSize: 5,
+                metaN: {},
+                symbolSize: (function() {{
+                    const n = {};
+                    return function(/* value, params */) {{
+                        // Larger for small n, smaller for large n; hard minimum of 2px
+                        return Math.max(2, Math.min(18, 14 - Math.log10(n + 1) * 3.5));
+                    }}
+                }})(),
                 large: true,
-                sampling: 'lttb',
+                largeThreshold: 2000,
                 data: {}
             }}"#,
             y_series.name(),
+            n_points,
+            n_points,
             data_json
         );
         series_objects.push(series_obj);
