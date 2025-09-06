@@ -57,7 +57,16 @@ fn select_x_series(df: &DataFrame, cli: &Cli) -> Result<(Series, String), AppErr
         return Ok((series, name));
     }
 
-    // Priority 3: Auto-detect first datetime column
+    // Priority 3: Audio-friendly default — use 'sample_index' if present
+    if df.get_column_names().iter().any(|&n| n == "sample_index") {
+        let series = df
+            .column("sample_index")
+            .map_err(|_| AppError::ColumnNotFound("sample_index".to_string()))?
+            .clone();
+        return Ok((series, "sample_index".to_string()));
+    }
+
+    // Priority 4: Auto-detect first datetime column
     for series in df.get_columns() {
         if matches!(series.dtype(), DataType::Datetime(_, _) | DataType::Date) {
             let name = series.name().to_string();
@@ -65,7 +74,7 @@ fn select_x_series(df: &DataFrame, cli: &Cli) -> Result<(Series, String), AppErr
         }
     }
 
-    // Priority 4: Fallback to row numbers
+    // Priority 5: Fallback to row numbers
     println!("  -> Warning: No index specified and no datetime column found. Using row numbers as index.");
     let row_count = df.height() as u32;
     let series = Series::new("row_index", (0..row_count).collect::<Vec<u32>>());
