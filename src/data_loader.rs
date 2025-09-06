@@ -16,25 +16,53 @@ pub fn load_dataframe(path: &Path) -> Result<DataFrame, AppError> {
         .unwrap_or_default()
         .to_lowercase();
 
-    match extension.as_str() {
+    let mut df = match extension.as_str() {
         "csv" => CsvReader::new(File::open(path)?)
             .finish()
-            .map_err(AppError::from),
+            .map_err(AppError::from)?,
         "parquet" => ParquetReader::new(File::open(path)?)
             .finish()
-            .map_err(AppError::from),
+            .map_err(AppError::from)?,
         "json" | "jsonl" | "ndjson" => {
             let file = File::open(path)?;
             JsonReader::new(file)
                 .with_json_format(JsonFormat::JsonLines)
                 .finish()
-                .map_err(AppError::from)
+                .map_err(AppError::from)?
         }
-        "wav" | "mp3" | "flac" => load_audio_dataframe(path),
-        _ => Err(AppError::UnsupportedFormat(
-            path.to_string_lossy().to_string(),
-        )),
+        "wav" | "mp3" | "flac" => return load_audio_dataframe(path),
+        _ => {
+            return Err(AppError::UnsupportedFormat(
+                path.to_string_lossy().to_string(),
+            ))
+        }
+    };
+
+    // Attempt to auto-coerce string columns that look like datetimes
+    try_cast_string_columns_to_datetime(&mut df)?;
+    Ok(df)
+}
+
+/// Try to cast string columns into Datetime using Polars' native casting.
+fn try_cast_string_columns_to_datetime(df: &mut DataFrame) -> Result<(), AppError> {
+    use polars::prelude::*;
+
+    let col_names: Vec<String> = df
+        .get_columns()
+        .iter()
+        .map(|s| s.name().to_string())
+        .collect();
+
+    for name in col_names {
+        let s = df.column(&name)?.clone();
+        if matches!(s.dtype(), DataType::String) {
+            if let Ok(parsed) = s.cast(&DataType::Datetime(TimeUnit::Milliseconds, None)) {
+                // Replace the column with the parsed datetime series
+                df.replace(&name, parsed).map_err(AppError::from)?;
+            }
+        }
     }
+    Ok(())
 }
 
 /// Loads an audio file and converts its first track to a DataFrame.

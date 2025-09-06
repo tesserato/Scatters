@@ -9,6 +9,13 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
     // Convert Polars Series into a format suitable for ECharts JSON
     let series_json_objects = build_series_json(plot_data)?;
 
+    // Determine x-axis type based on data
+    let x_axis_type = match plot_data.x_series.dtype() {
+        DataType::Datetime(_, _) | DataType::Date => "time",
+        DataType::String => "category",
+        _ => "value",
+    };
+
     // Generate HTML using simple string formatting
     let html_content = format!(r#"<!DOCTYPE html>
 <html>
@@ -33,7 +40,7 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
                     saveAsImage: {{}}
                 }}
             }},
-            xAxis: {{ type: 'value', splitLine: {{ show: false }} }},
+            xAxis: {{ type: '{}', splitLine: {{ show: false }} }},
             yAxis: {{ type: 'value', axisLine: {{ show: true }} }},
             dataZoom: [
                 {{ type: 'inside', start: 0, end: 100 }},
@@ -46,6 +53,7 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
 </html>"#, 
         plot_data.title, 
         plot_data.title, 
+        x_axis_type,
         series_json_objects.join(",")
     );
 
@@ -108,8 +116,20 @@ fn any_value_to_json_value(av: AnyValue) -> Value {
         AnyValue::Int64(v) => v.into(),
         AnyValue::Float32(v) => v.into(),
         AnyValue::Float64(v) => v.into(),
-        AnyValue::Date(d) => Value::String(d.to_string()),
-        AnyValue::Datetime(dt, _, _) => Value::String(dt.to_string()),
+        // Polars Date is days since epoch
+        AnyValue::Date(days) => {
+            let ms = (days as i64) * 86_400_000;
+            ms.into()
+        }
+        // Polars Datetime is epoch value with unit
+        AnyValue::Datetime(v, unit, _) => {
+            let ms = match unit {
+                polars::prelude::TimeUnit::Nanoseconds => v / 1_000_000,
+                polars::prelude::TimeUnit::Microseconds => v / 1_000,
+                polars::prelude::TimeUnit::Milliseconds => v,
+            };
+            ms.into()
+        }
         _ => Value::String(av.to_string()), // Fallback for other types
     }
 }
