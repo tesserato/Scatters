@@ -1,1 +1,2 @@
-cargo build
+# cargo run -- --help
+cargo run -- "./sample"

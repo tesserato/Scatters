@@ -29,7 +29,7 @@ pub struct Cli {
 
     /// Comma-separated list of columns to plot (Y-axis).
     /// If not provided, all numeric columns will be plotted.
-    #[arg(short, long, use_delimiter = ',')]
+    #[arg(short, long, use_value_delimiter = true, value_delimiter = ',')]
     pub columns: Option<Vec<String>>,
 
     /// A custom title for the plot.

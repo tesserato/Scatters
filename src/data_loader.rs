@@ -17,7 +17,9 @@ pub fn load_dataframe(path: &Path) -> Result<DataFrame, AppError> {
         .to_lowercase();
 
     match extension.as_str() {
-        "csv" => CsvReader::from_path(path)?.finish().map_err(AppError::from),
+        "csv" => CsvReader::new(File::open(path)?)
+            .finish()
+            .map_err(AppError::from),
         "parquet" => ParquetReader::new(File::open(path)?)
             .finish()
             .map_err(AppError::from),

@@ -1,6 +1,6 @@
 use crate::error::AppError;
 use crate::processing::PlotData;
-use hypertext::{html, maud, Raw};
+// Removed hypertext dependency - using simple string formatting
 use polars::prelude::*;
 use serde_json::Value;
 
@@ -9,48 +9,47 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
     // Convert Polars Series into a format suitable for ECharts JSON
     let series_json_objects = build_series_json(plot_data)?;
 
-    // Use hypertext (maud syntax) to build the HTML structure
-    let markup = html! {
-        <!DOCTYPE html>
-        html {
-            head {
-                meta(charset="utf-8");
-                title { (plot_data.title) }
-                script(src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js") {}
-            }
-            body {
-                div(id="main", style="width: 100%; height: 95vh;") {}
-                script {
-                    // Use Raw() to inject the JavaScript code without HTML escaping
-                    (Raw(format!(r#"
-                        var myChart = echarts.init(document.getElementById('main'), 'light');
-                        myChart.setOption({{
-                            title: {{ text: '{}' }},
-                            tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'cross' }} }},
-                            legend: {{ type: 'scroll', top: 30 }},
-                            grid: {{ left: '5%', right: '5%', bottom: '10%', containLabel: true }},
-                            toolbox: {{
-                                feature: {{
-                                    dataZoom: {{ yAxisIndex: 'none' }},
-                                    restore: {{}},
-                                    saveAsImage: {{}}
-                                }}
-                            }},
-                            xAxis: {{ type: 'value', splitLine: {{ show: false }} }},
-                            yAxis: {{ type: 'value', axisLine: {{ show: true }} }},
-                            dataZoom: [
-                                {{ type: 'inside', start: 0, end: 100 }},
-                                {{ type: 'slider', start: 0, end: 100, height: 40 }}
-                            ],
-                            series: [ {} ]
-                        }});
-                    "#, plot_data.title, series_json_objects.join(","))))
-                }
-            }
-        }
-    };
+    // Generate HTML using simple string formatting
+    let html_content = format!(r#"<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>{}</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
+</head>
+<body>
+    <div id="main" style="width: 100%; height: 95vh;"></div>
+    <script>
+        var myChart = echarts.init(document.getElementById('main'), 'light');
+        myChart.setOption({{
+            title: {{ text: '{}' }},
+            tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'cross' }} }},
+            legend: {{ type: 'scroll', top: 30 }},
+            grid: {{ left: '5%', right: '5%', bottom: '10%', containLabel: true }},
+            toolbox: {{
+                feature: {{
+                    dataZoom: {{ yAxisIndex: 'none' }},
+                    restore: {{}},
+                    saveAsImage: {{}}
+                }}
+            }},
+            xAxis: {{ type: 'value', splitLine: {{ show: false }} }},
+            yAxis: {{ type: 'value', axisLine: {{ show: true }} }},
+            dataZoom: [
+                {{ type: 'inside', start: 0, end: 100 }},
+                {{ type: 'slider', start: 0, end: 100, height: 40 }}
+            ],
+            series: [ {} ]
+        }});
+    </script>
+</body>
+</html>"#, 
+        plot_data.title, 
+        plot_data.title, 
+        series_json_objects.join(",")
+    );
 
-    Ok(markup.render())
+    Ok(html_content)
 }
 
 /// Builds the JavaScript object strings for each series.
@@ -64,7 +63,7 @@ fn build_series_json(plot_data: &PlotData) -> Result<Vec<String>, AppError> {
             .iter()
             .zip(y_series.iter())
             .filter_map(|(x_val, y_val)| {
-                if x_val.is_not_null() && y_val.is_not_null() {
+                if !matches!(x_val, AnyValue::Null) && !matches!(y_val, AnyValue::Null) {
                     let x = any_value_to_json_value(x_val);
                     let y = any_value_to_json_value(y_val);
                     Some([x, y])
