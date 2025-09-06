@@ -29,7 +29,7 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
         }
         if min_v.is_finite() && max_v.is_finite() {
             let span = (max_v - min_v).abs();
-            let pad = if span == 0.0 { 1.0 } else { span * 0.05 };
+            let pad = if span == 0.0 { 1.0 } else { span * 0.10 };
             (format!("{}", min_v - pad), format!("{}", max_v + pad))
         } else {
             (String::from("null"), String::from("null"))
@@ -75,38 +75,91 @@ function computeSize(n, pct) {{
 return Math.max(1, Math.min(36, (14 - Math.log10(visibleN + 1) * 3.5) * 2));
         }}
 
-        // Apply sizes immediately and on zoom
-function applySymbolSizes(pct) {{
+// Apply sizes and y-axis autoscale immediately and on zoom
+function applySymbolSizes(startPct, endPct) {{
+            var pct = Math.max(0, Math.min(1, endPct - startPct));
             var opt = myChart.getOption();
             var series = opt.series || [];
-var newSeries = series.map(function (s) {{
+            var xAxis = (opt.xAxis && opt.xAxis[0]) ? opt.xAxis[0] : {{}};
+            var xType = xAxis.type || 'value';
+            var newSeries = series.map(function (s) {{
                 var n = (s.metaN != null) ? s.metaN : ((s.data && s.data.length) ? s.data.length : 1000);
                 var size = computeSize(n, pct);
                 // Toggle large mode based on visible points for better styling accuracy when zoomed-in
                 var visibleN = Math.max(1, Math.round(n * pct));
                 var useLarge = visibleN > 5000;
-return {{ symbolSize: size, large: useLarge }};
-}});
-            myChart.setOption({{ series: newSeries }}, false, false);
+                return {{ symbolSize: size, large: useLarge }};
+            }});
+
+            // Y-axis autoscale based on visible window (time/value axis only)
+            var yMin = Number.POSITIVE_INFINITY, yMax = Number.NEGATIVE_INFINITY;
+            if (xType === 'time' || xType === 'value') {{
+                var allXMin = Number.POSITIVE_INFINITY, allXMax = Number.NEGATIVE_INFINITY;
+                for (var i = 0; i < series.length; i++) {{
+                    var s = series[i];
+                    if (typeof s.metaXMin === 'number') allXMin = Math.min(allXMin, s.metaXMin);
+                    if (typeof s.metaXMax === 'number') allXMax = Math.max(allXMax, s.metaXMax);
+                }}
+                if (isFinite(allXMin) && isFinite(allXMax) && allXMax > allXMin) {{
+                    var startVal = allXMin + startPct * (allXMax - allXMin);
+                    var endVal = allXMin + endPct * (allXMax - allXMin);
+                    if (startVal > endVal) {{ var tmp = startVal; startVal = endVal; endVal = tmp; }}
+
+                    // Scan data with stride for performance
+                    for (var i = 0; i < series.length; i++) {{
+                        var s = series[i];
+                        var d = s.data || [];
+                        var estimate = (typeof s.metaN === 'number' ? s.metaN : d.length) * Math.max(0, endPct - startPct);
+                        var stride = 1;
+                        if (estimate > 5000 && d.length > 5000) {{
+                            stride = Math.max(1, Math.floor(estimate / 2000));
+                        }}
+                        for (var j = 0; j < d.length; j += stride) {{
+                            var p = d[j];
+                            var x = Array.isArray(p) ? p[0] : null;
+                            var y = Array.isArray(p) ? p[1] : null;
+                            if (typeof x === 'number' && typeof y === 'number') {{
+                                if (x >= startVal && x <= endVal) {{
+                                    if (isFinite(y)) {{
+                                        if (y < yMin) yMin = y;
+                                        if (y > yMax) yMax = y;
+                                    }}
+                                }}
+                            }}
+                        }}
+                    }}
+                }}
+            }}
+
+            var yAxisUpdate = {{}};
+            if (isFinite(yMin) && isFinite(yMax)) {{
+                var span = Math.abs(yMax - yMin);
+                var pad = (span === 0) ? 1.0 : (span * 0.10);
+                yAxisUpdate.min = yMin - pad;
+                yAxisUpdate.max = yMax + pad;
+            }}
+
+            myChart.setOption({{ series: newSeries, yAxis: [yAxisUpdate] }}, false, false);
         }}
 
 // Initial apply for full view
-        applySymbolSizes(1.0);
+        applySymbolSizes(0.0, 1.0);
 
         // Adapt symbol sizes to the current zoom window
 myChart.on('dataZoom', function () {{
             var opt = myChart.getOption();
             var dzArr = opt.dataZoom || [];
-if (!dzArr.length) {{ return; }}
+            if (!dzArr.length) {{ return; }}
             var dz = dzArr[0];
             var start = (dz.start != null) ? dz.start : 0;
             var end = (dz.end != null) ? dz.end : 100;
-            var pct = Math.max(0, (end - start) / 100);
-applySymbolSizes(pct);
+            var startPct = Math.max(0, Math.min(1, start / 100));
+            var endPct = Math.max(0, Math.min(1, end / 100));
+applySymbolSizes(startPct, endPct);
         }});
         // Re-apply sizes after toolbox restore resets options
-        myChart.on('restore', function () {{
-            setTimeout(function() {{ applySymbolSizes(1.0); }}, 0);
+myChart.on('restore', function () {{
+            setTimeout(function() {{ applySymbolSizes(0.0, 1.0); }}, 0);
         }});
     </script>
 </body>
@@ -129,33 +182,54 @@ fn build_series_json(plot_data: &PlotData) -> Result<Vec<String>, AppError> {
 
     for y_series in &plot_data.y_series_list {
         // Zip X and Y series into [x, y] pairs, filtering out nulls
-        let data_points: Vec<[Value; 2]> = x_series
-            .iter()
-            .zip(y_series.iter())
-            .filter_map(|(x_val, y_val)| {
-                if !matches!(x_val, AnyValue::Null) && !matches!(y_val, AnyValue::Null) {
-                    let x = any_value_to_json_value(x_val);
-                    let y = any_value_to_json_value(y_val);
-                    Some([x, y])
-                } else {
-                    None
+        let mut data_points: Vec<[Value; 2]> = Vec::new();
+        let mut x_min = f64::INFINITY;
+        let mut x_max = f64::NEG_INFINITY;
+        let mut y_min = f64::INFINITY;
+        let mut y_max = f64::NEG_INFINITY;
+
+        for (x_val, y_val) in x_series.iter().zip(y_series.iter()) {
+            if !matches!(x_val, AnyValue::Null) && !matches!(y_val, AnyValue::Null) {
+                // JSON values for rendering
+                let x_json = any_value_to_json_value(x_val.clone());
+                let y_json = any_value_to_json_value(y_val.clone());
+                data_points.push([x_json, y_json]);
+
+                // Numeric values for meta range calculations (only numeric/time)
+                if let (Some(xn), Some(yn)) = (any_value_to_f64(x_val), any_value_to_f64(y_val)) {
+                    if xn.is_finite() {
+                        x_min = x_min.min(xn);
+                        x_max = x_max.max(xn);
+                    }
+                    if yn.is_finite() {
+                        y_min = y_min.min(yn);
+                        y_max = y_max.max(yn);
+                    }
                 }
-            })
-            .collect();
+            }
+        }
 
         let data_json = serde_json::to_string(&data_points)?;
         let n_points = data_points.len();
+        let x_min_str = if x_min.is_finite() { format!("{}", x_min) } else { "null".to_string() };
+        let x_max_str = if x_max.is_finite() { format!("{}", x_max) } else { "null".to_string() };
+        let y_min_str = if y_min.is_finite() { format!("{}", y_min) } else { "null".to_string() };
+        let y_max_str = if y_max.is_finite() { format!("{}", y_max) } else { "null".to_string() };
 
         let series_obj = format!(
             r#"{{
                 name: '{}',
                 type: 'scatter',
                 metaN: {},
+                metaXMin: {},
+                metaXMax: {},
+                metaYMin: {},
+                metaYMax: {},
                 symbolSize: (function() {{
                     const n = {};
                     return function(/* value, params */) {{
-// Larger for small n, smaller for large n; hard minimum of 1px, cap ~36px
-return Math.max(1, Math.min(36, (14 - Math.log10(n + 1) * 3.5) * 2));
+                        // Larger for small n, smaller for large n; hard minimum of 4px, cap ~36px
+                        return Math.max(4, Math.min(36, (14 - Math.log10(n + 1) * 3.5) * 2));
                     }}
                 }})(),
                 large: true,
@@ -164,6 +238,10 @@ return Math.max(1, Math.min(36, (14 - Math.log10(n + 1) * 3.5) * 2));
             }}"#,
             y_series.name(),
             n_points,
+            x_min_str,
+            x_max_str,
+            y_min_str,
+            y_max_str,
             n_points,
             data_json
         );
@@ -203,5 +281,28 @@ fn any_value_to_json_value(av: AnyValue) -> Value {
             ms.into()
         }
         _ => Value::String(av.to_string()), // Fallback for other types
+    }
+}
+
+/// Convert AnyValue to f64 if numeric or datetime/date; otherwise None.
+fn any_value_to_f64(av: AnyValue) -> Option<f64> {
+    match av {
+        AnyValue::UInt8(v) => Some(v as f64),
+        AnyValue::UInt16(v) => Some(v as f64),
+        AnyValue::UInt32(v) => Some(v as f64),
+        AnyValue::UInt64(v) => Some(v as f64),
+        AnyValue::Int8(v) => Some(v as f64),
+        AnyValue::Int16(v) => Some(v as f64),
+        AnyValue::Int32(v) => Some(v as f64),
+        AnyValue::Int64(v) => Some(v as f64),
+        AnyValue::Float32(v) => Some(v as f64),
+        AnyValue::Float64(v) => Some(v),
+        AnyValue::Date(days) => Some((days as i64 as f64) * 86_400_000.0),
+        AnyValue::Datetime(v, unit, _) => Some(match unit {
+            polars::prelude::TimeUnit::Nanoseconds => (v as f64) / 1_000_000.0,
+            polars::prelude::TimeUnit::Microseconds => (v as f64) / 1_000.0,
+            polars::prelude::TimeUnit::Milliseconds => v as f64,
+        }),
+        _ => None,
     }
 }
