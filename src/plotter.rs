@@ -104,6 +104,10 @@ if (!dzArr.length) {{ return; }}
             var pct = Math.max(0, (end - start) / 100);
 applySymbolSizes(pct);
         }});
+        // Re-apply sizes after toolbox restore resets options
+        myChart.on('restore', function () {{
+            setTimeout(function() {{ applySymbolSizes(1.0); }}, 0);
+        }});
     </script>
 </body>
 </html>"#, 
