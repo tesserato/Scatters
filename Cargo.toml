@@ -1,0 +1,28 @@
+[package]
+name = "data_plotter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Core data processing
+polars = { version = "0.40.0", features = ["lazy", "csv", "parquet", "json", "dtype-datetime", "dtype-date"] }
+
+# Audio file processing
+symphonia = { version = "0.5.4", features = ["all-formats", "all-codecs"] }
+
+# CLI argument parsing
+clap = { version = "4.5.4", features = ["derive"] }
+
+# Filesystem traversal
+walkdir = "2.5.0"
+
+# Error handling
+anyhow = "1.0.82"
+thiserror = "1.0.59"
+
+# Type-safe HTML generation
+hypertext = "0.2.0"
+
+# JSON serialization for embedding data in HTML/JS
+serde = { version = "1.0.200", features = ["derive"] }
+serde_json = "1.0.116"
