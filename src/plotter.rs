@@ -72,7 +72,7 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
 function computeSize(n, pct) {{
             pct = Math.max(0, Math.min(1, pct));
             var visibleN = (pct <= 0) ? 1 : Math.max(1, Math.round(n * pct));
-return Math.max(2, Math.min(18, 14 - Math.log10(visibleN + 1) * 3.5));
+return Math.max(1, Math.min(36, (14 - Math.log10(visibleN + 1) * 3.5) * 2));
         }}
 
         // Apply sizes immediately and on zoom
@@ -150,8 +150,8 @@ fn build_series_json(plot_data: &PlotData) -> Result<Vec<String>, AppError> {
                 symbolSize: (function() {{
                     const n = {};
                     return function(/* value, params */) {{
-                        // Larger for small n, smaller for large n; hard minimum of 2px
-                        return Math.max(2, Math.min(18, 14 - Math.log10(n + 1) * 3.5));
+// Larger for small n, smaller for large n; hard minimum of 1px, cap ~36px
+return Math.max(1, Math.min(36, (14 - Math.log10(n + 1) * 3.5) * 2));
                     }}
                 }})(),
                 large: true,
