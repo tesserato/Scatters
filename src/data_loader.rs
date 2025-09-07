@@ -20,9 +20,7 @@ pub fn load_dataframe(path: &Path) -> Result<DataFrame, AppError> {
         "csv" => {
             // First, try reading assuming a header is present (Polars default)
             let file = File::open(path)?;
-            let df = CsvReader::new(file)
-                .finish()
-                .map_err(AppError::from)?;
+            let df = CsvReader::new(file).finish().map_err(AppError::from)?;
             df
         }
         "parquet" => ParquetReader::new(File::open(path)?)
@@ -44,14 +42,17 @@ pub fn load_dataframe(path: &Path) -> Result<DataFrame, AppError> {
         }
     };
 
-    // Attempt to auto-coerce string columns that look like datetimes
-    try_cast_string_columns_to_datetime(&mut df)?;
-    // Next, try to coerce string columns that look numeric into Float64
+    // First, try to coerce string columns that look numeric into Float64.
+    // This prevents purely numeric IDs from being misinterpreted as dates.
     try_cast_string_columns_to_numeric(&mut df)?;
+    // Next, attempt to auto-coerce remaining string columns that look like datetimes.
+    try_cast_string_columns_to_datetime(&mut df)?;
+
     Ok(df)
 }
 
 /// Try to cast string columns into Datetime using multiple strategies.
+/// This will only convert the column if a high percentage of non-null values can be parsed.
 /// 1) Polars native cast (RFC-like formats)
 /// 2) Heuristic parser for many common formats: YYYY{sep}MM{sep}DD or DD{sep}MM{sep}YYYY,
 ///    optionally followed by time (HH, HH:MM, HH:MM:SS) and date-time separators of 'T' or space.
@@ -68,7 +69,12 @@ fn try_cast_string_columns_to_datetime(df: &mut DataFrame) -> Result<(), AppErro
             let mut accepted = false;
             // Strategy 1: native cast
             if let Ok(parsed) = s.cast(&DataType::Datetime(TimeUnit::Milliseconds, None)) {
-                if parsed.null_count() < parsed.len() { // at least one parsed
+                let original_non_nulls = s.len() - s.null_count();
+                let parsed_non_nulls = parsed.len() - parsed.null_count();
+
+                // Only accept the cast if it's successful for at least 90% of non-null values.
+                // This avoids converting columns with only a few date-like strings.
+                if original_non_nulls > 0 && parsed_non_nulls * 10 >= original_non_nulls * 9 {
                     df.replace(&name, parsed).map_err(AppError::from)?;
                     accepted = true;
                 }
@@ -88,13 +94,13 @@ fn try_cast_string_columns_to_datetime(df: &mut DataFrame) -> Result<(), AppErro
 fn parse_string_series_to_datetime(s: &Series) -> Option<Series> {
     use chrono::{NaiveDate, NaiveDateTime};
     // Generate candidate format strings
-    let seps: &[char] = &[ '-', '/', '.', ' ' ];
+    let seps: &[char] = &['-', '/', '.', ' '];
     let dt_seps: &[&str] = &["T", " "];
     let mut fmts: Vec<String> = Vec::new();
     for &sep in seps {
         let sep_s = sep.to_string();
-        let ymd = format!("%Y{sep}%m{sep}%d", sep=sep_s);
-        let dmy = format!("%d{sep}%m{sep}%Y", sep=sep_s);
+        let ymd = format!("%Y{sep}%m{sep}%d", sep = sep_s);
+        let dmy = format!("%d{sep}%m{sep}%Y", sep = sep_s);
         // date-only
         fmts.push(ymd.clone());
         fmts.push(dmy.clone());
@@ -133,14 +139,21 @@ fn parse_string_series_to_datetime(s: &Series) -> Option<Series> {
         };
         parsed.push(ms_opt);
     }
-    let non_null = parsed.iter().filter(|v| v.is_some()).count();
-    if non_null == 0 { return None; }
 
-    // Build series -> Int64 -> Datetime(ms)
-    let ca: Int64Chunked = parsed.into_iter().collect();
-    let series = ca.into_series();
-    let casted = series.cast(&DataType::Datetime(TimeUnit::Milliseconds, None)).ok()?;
-    Some(casted)
+    // Apply the 90% threshold here as well.
+    let parsed_non_nulls = parsed.iter().filter(|v| v.is_some()).count();
+    let original_non_nulls = s.len() - s.null_count();
+
+    if original_non_nulls > 0 && parsed_non_nulls * 10 >= original_non_nulls * 9 {
+        // Build series -> Int64 -> Datetime(ms)
+        let ca: Int64Chunked = parsed.into_iter().collect();
+        let series = ca.into_series();
+        series
+            .cast(&DataType::Datetime(TimeUnit::Milliseconds, None))
+            .ok()
+    } else {
+        None
+    }
 }
 
 fn try_parse_many(s: &str, fmts: &[String]) -> Option<i64> {
@@ -187,6 +200,10 @@ fn try_cast_string_columns_to_numeric(df: &mut DataFrame) -> Result<(), AppError
                 })
                 .collect();
             let parsed_series = Series::new(&name, parsed_vals);
+
+            // Only replace if the number of successfully parsed values is greater than
+            // the number of failed values (nulls). This avoids converting columns
+            // that are mostly non-numeric but contain some numbers.
             if parsed_series.null_count() * 2 < parsed_series.len() {
                 df.replace(&name, parsed_series).map_err(AppError::from)?;
             }
@@ -216,18 +233,27 @@ fn load_excel_dataframe(path: &Path) -> Result<DataFrame, AppError> {
     let mut header_idx: Option<usize> = None;
     for (i, r) in rows.iter().enumerate() {
         let all_empty = r.iter().all(|c| matches!(c, Xl::Empty));
-        if !all_empty { header_idx = Some(i); break; }
+        if !all_empty {
+            header_idx = Some(i);
+            break;
+        }
     }
-    let header_idx = header_idx.ok_or_else(|| AppError::UnsupportedFormat(path.to_string_lossy().to_string()))?;
+    let header_idx = header_idx
+        .ok_or_else(|| AppError::UnsupportedFormat(path.to_string_lossy().to_string()))?;
 
     // Determine column count as max row length
     let col_count = rows.iter().map(|r| r.len()).max().unwrap_or(0);
-    if col_count == 0 { return Err(AppError::UnsupportedFormat(path.to_string_lossy().to_string())); }
+    if col_count == 0 {
+        return Err(AppError::UnsupportedFormat(
+            path.to_string_lossy().to_string(),
+        ));
+    }
 
     // Build header names from the header row
     let mut headers: Vec<String> = Vec::with_capacity(col_count);
     for i in 0..col_count {
-        let name = rows.get(header_idx)
+        let name = rows
+            .get(header_idx)
             .and_then(|r| r.get(i))
             .map(|c| match c {
                 Xl::String(s) => s.trim().to_string(),
@@ -238,7 +264,11 @@ fn load_excel_dataframe(path: &Path) -> Result<DataFrame, AppError> {
                 _ => String::new(),
             })
             .unwrap_or_default();
-        let final_name = if name.is_empty() { format!("col_{}", i + 1) } else { name };
+        let final_name = if name.is_empty() {
+            format!("col_{}", i + 1)
+        } else {
+            name
+        };
         headers.push(final_name);
     }
 
@@ -246,20 +276,25 @@ fn load_excel_dataframe(path: &Path) -> Result<DataFrame, AppError> {
     let mut columns: Vec<Vec<Option<String>>> = vec![Vec::new(); col_count];
 
     for (ri, row) in rows.iter().enumerate() {
-        if ri <= header_idx { continue; } // skip header and any leading rows before it
+        if ri <= header_idx {
+            continue;
+        } // skip header and any leading rows before it
         for ci in 0..col_count {
-            let val_str_opt: Option<String> = row.get(ci).map(|c| match c {
-                Xl::Empty => None,
-                Xl::String(s) => Some(s.trim().to_string()),
-                Xl::Float(v) => Some(v.to_string()),
-                Xl::Int(v) => Some(v.to_string()),
-                Xl::Bool(v) => Some(v.to_string()),
-                Xl::DateTime(v) => Some(v.to_string()),
-                Xl::Duration(v) => Some(v.to_string()),
-                Xl::DateTimeIso(s) => Some(s.trim().to_string()),
-                Xl::DurationIso(s) => Some(s.trim().to_string()),
-                Xl::Error(_) => None,
-            }).flatten();
+            let val_str_opt: Option<String> = row
+                .get(ci)
+                .map(|c| match c {
+                    Xl::Empty => None,
+                    Xl::String(s) => Some(s.trim().to_string()),
+                    Xl::Float(v) => Some(v.to_string()),
+                    Xl::Int(v) => Some(v.to_string()),
+                    Xl::Bool(v) => Some(v.to_string()),
+                    Xl::DateTime(v) => Some(v.to_string()),
+                    Xl::Duration(v) => Some(v.to_string()),
+                    Xl::DateTimeIso(s) => Some(s.trim().to_string()),
+                    Xl::DurationIso(s) => Some(s.trim().to_string()),
+                    Xl::Error(_) => None,
+                })
+                .flatten();
             columns[ci].push(val_str_opt);
         }
     }
