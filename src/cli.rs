@@ -36,4 +36,12 @@ pub struct Cli {
     /// Defaults to the input filename.
     #[arg(long)]
     pub title: Option<String>,
+
+    /// Disable dynamic Y-axis autoscaling (keep initial 10% padded range)
+    #[arg(long, default_value_t = false)]
+    pub no_autoscale_y: bool,
+
+    /// Disable ECharts animations for faster interaction
+    #[arg(long, default_value_t = false)]
+    pub no_animations: bool,
 }

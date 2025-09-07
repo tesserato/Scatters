@@ -37,6 +37,8 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
     };
 
     // Generate HTML using simple string formatting
+    let autoscale_js = if plot_data.autoscale_y { "true" } else { "false" };
+    let animations_js = if plot_data.animations { "true" } else { "false" };
     let html_content = format!(r#"<!DOCTYPE html>
 <html>
 <head>
@@ -47,8 +49,11 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
 <body>
     <div id="main" style="width: 100%; height: 95vh;"></div>
     <script>
+        var AUTOSCALE_Y = {};
+        var ANIMATIONS = {};
         var myChart = echarts.init(document.getElementById('main'), 'light');
         myChart.setOption({{
+            animation: ANIMATIONS,
             title: {{ text: '{}' }},
             tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'cross' }} }},
             legend: {{ type: 'scroll', top: 30 }},
@@ -91,55 +96,60 @@ function applySymbolSizes(startPct, endPct) {{
                 return {{ symbolSize: size, large: useLarge }};
             }});
 
-            // Y-axis autoscale based on visible window (time/value axis only)
-            var yMin = Number.POSITIVE_INFINITY, yMax = Number.NEGATIVE_INFINITY;
-            if (xType === 'time' || xType === 'value') {{
-                var allXMin = Number.POSITIVE_INFINITY, allXMax = Number.NEGATIVE_INFINITY;
-                for (var i = 0; i < series.length; i++) {{
-                    var s = series[i];
-                    if (typeof s.metaXMin === 'number') allXMin = Math.min(allXMin, s.metaXMin);
-                    if (typeof s.metaXMax === 'number') allXMax = Math.max(allXMax, s.metaXMax);
-                }}
-                if (isFinite(allXMin) && isFinite(allXMax) && allXMax > allXMin) {{
-                    var startVal = allXMin + startPct * (allXMax - allXMin);
-                    var endVal = allXMin + endPct * (allXMax - allXMin);
-                    if (startVal > endVal) {{ var tmp = startVal; startVal = endVal; endVal = tmp; }}
+            var updates = {{ series: newSeries }};
 
-                    // Scan data with stride for performance
+            if (AUTOSCALE_Y) {{
+                // Y-axis autoscale based on visible window (time/value axis only)
+                var yMin = Number.POSITIVE_INFINITY, yMax = Number.NEGATIVE_INFINITY;
+                if (xType === 'time' || xType === 'value') {{
+                    var allXMin = Number.POSITIVE_INFINITY, allXMax = Number.NEGATIVE_INFINITY;
                     for (var i = 0; i < series.length; i++) {{
                         var s = series[i];
-                        var d = s.data || [];
-                        var estimate = (typeof s.metaN === 'number' ? s.metaN : d.length) * Math.max(0, endPct - startPct);
-                        var stride = 1;
-                        if (estimate > 5000 && d.length > 5000) {{
-                            stride = Math.max(1, Math.floor(estimate / 2000));
-                        }}
-                        for (var j = 0; j < d.length; j += stride) {{
-                            var p = d[j];
-                            var x = Array.isArray(p) ? p[0] : null;
-                            var y = Array.isArray(p) ? p[1] : null;
-                            if (typeof x === 'number' && typeof y === 'number') {{
-                                if (x >= startVal && x <= endVal) {{
-                                    if (isFinite(y)) {{
-                                        if (y < yMin) yMin = y;
-                                        if (y > yMax) yMax = y;
+                        if (typeof s.metaXMin === 'number') allXMin = Math.min(allXMin, s.metaXMin);
+                        if (typeof s.metaXMax === 'number') allXMax = Math.max(allXMax, s.metaXMax);
+                    }}
+                    if (isFinite(allXMin) && isFinite(allXMax) && allXMax > allXMin) {{
+                        var startVal = allXMin + startPct * (allXMax - allXMin);
+                        var endVal = allXMin + endPct * (allXMax - allXMin);
+                        if (startVal > endVal) {{ var tmp = startVal; startVal = endVal; endVal = tmp; }}
+
+                        // Scan data with stride for performance
+                        for (var i = 0; i < series.length; i++) {{
+                            var s = series[i];
+                            var d = s.data || [];
+                            var estimate = (typeof s.metaN === 'number' ? s.metaN : d.length) * Math.max(0, endPct - startPct);
+                            var stride = 1;
+                            if (estimate > 5000 && d.length > 5000) {{
+                                stride = Math.max(1, Math.floor(estimate / 2000));
+                            }}
+                            for (var j = 0; j < d.length; j += stride) {{
+                                var p = d[j];
+                                var x = Array.isArray(p) ? p[0] : null;
+                                var y = Array.isArray(p) ? p[1] : null;
+                                if (typeof x === 'number' && typeof y === 'number') {{
+                                    if (x >= startVal && x <= endVal) {{
+                                        if (isFinite(y)) {{
+                                            if (y < yMin) yMin = y;
+                                            if (y > yMax) yMax = y;
+                                        }}
                                     }}
                                 }}
                             }}
                         }}
                     }}
                 }}
+
+                var yAxisUpdate = {{}};
+                if (isFinite(yMin) && isFinite(yMax)) {{
+                    var span = Math.abs(yMax - yMin);
+                    var pad = (span === 0) ? 1.0 : (span * 0.10);
+                    yAxisUpdate.min = yMin - pad;
+                    yAxisUpdate.max = yMax + pad;
+                }}
+                updates.yAxis = [yAxisUpdate];
             }}
 
-            var yAxisUpdate = {{}};
-            if (isFinite(yMin) && isFinite(yMax)) {{
-                var span = Math.abs(yMax - yMin);
-                var pad = (span === 0) ? 1.0 : (span * 0.10);
-                yAxisUpdate.min = yMin - pad;
-                yAxisUpdate.max = yMax + pad;
-            }}
-
-            myChart.setOption({{ series: newSeries, yAxis: [yAxisUpdate] }}, false, false);
+            myChart.setOption(updates, false, false);
         }}
 
 // Initial apply for full view
@@ -164,8 +174,10 @@ myChart.on('restore', function () {{
     </script>
 </body>
 </html>"#, 
-        plot_data.title, 
-        plot_data.title, 
+        plot_data.title,
+        autoscale_js,
+        animations_js,
+        plot_data.title,
         x_axis_type,
         y_min_str,
         y_max_str,

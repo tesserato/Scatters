@@ -8,6 +8,8 @@ pub struct PlotData {
     pub title: String,
     pub x_series: Series,
     pub y_series_list: Vec<Series>,
+    pub autoscale_y: bool,
+    pub animations: bool,
 }
 
 /// Selects the X and Y series from a DataFrame based on user preferences.
@@ -31,6 +33,8 @@ pub fn prepare_plot_data(df: DataFrame, cli: &Cli, file_path: &Path) -> Result<P
         title,
         x_series,
         y_series_list,
+        autoscale_y: !cli.no_autoscale_y,
+        animations: !cli.no_animations,
     })
 }
 
