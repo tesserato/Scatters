@@ -3,9 +3,28 @@ name = "scatters"
 version = "0.0.0"
 edition = "2021"
 
+authors = ["Tesserato <tesserato@hotmail.com>"]
+
+description = "A CLI to instantly turn tabular data and audio files into interactive HTML scatter plots."
+
+license = "MIT"
+
+readme = "README.md"
+
+keywords = ["plot", "chart", "visualization", "cli", "data", "csv", "echarts"]
+
+categories = ["command-line-utilities", "visualization", "data-processing"]
+
 [dependencies]
 # Core data processing
-polars = { version = "0.40.0", features = ["lazy", "csv", "parquet", "json", "dtype-datetime", "dtype-date"] }
+polars = { version = "0.40.0", features = [
+    "lazy",
+    "csv",
+    "parquet",
+    "json",
+    "dtype-datetime",
+    "dtype-date",
+] }
 
 # Excel file processing
 calamine = "0.22"
