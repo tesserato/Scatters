@@ -127,7 +127,7 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
             animation: ANIMATIONS,
             title: {{ text: '{}', top: 5, textStyle: {{ color: TITLE_COLOR }} }},
             tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'cross' }}, valueFormatter: formatNumber }},
-            legend: {{ type: 'scroll', top: 70 }},
+            legend: {{ type: 'scroll', top: 30 }},
             grid: {{ left: '2%', right: '2%', bottom: '6%', containLabel: true }},
             toolbox: {{
                 feature: {{

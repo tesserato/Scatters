@@ -7,6 +7,9 @@ edition = "2021"
 # Core data processing
 polars = { version = "0.40.0", features = ["lazy", "csv", "parquet", "json", "dtype-datetime", "dtype-date"] }
 
+# Excel file processing
+calamine = "0.22"
+
 # Audio file processing
 symphonia = { version = "0.5.4", features = ["all-formats", "all-codecs"] }
 

@@ -35,6 +35,7 @@ pub fn load_dataframe(path: &Path) -> Result<DataFrame, AppError> {
                 .finish()
                 .map_err(AppError::from)?
         }
+        "xlsx" | "xls" => load_excel_dataframe(path)?,
         "wav" | "mp3" | "flac" => return load_audio_dataframe(path),
         _ => {
             return Err(AppError::UnsupportedFormat(
@@ -101,6 +102,84 @@ fn try_cast_string_columns_to_numeric(df: &mut DataFrame) -> Result<(), AppError
         }
     }
     Ok(())
+}
+
+/// Loads an Excel file (first worksheet) into a DataFrame.
+fn load_excel_dataframe(path: &Path) -> Result<DataFrame, AppError> {
+    use calamine::{open_workbook_auto, DataType as Xl, Reader};
+
+    let mut workbook = open_workbook_auto(path)?;
+    let sheet_name = workbook
+        .sheet_names()
+        .get(0)
+        .cloned()
+        .ok_or_else(|| AppError::UnsupportedFormat(path.to_string_lossy().to_string()))?;
+
+    let range = workbook
+        .worksheet_range(&sheet_name)
+        .ok_or_else(|| AppError::UnsupportedFormat(path.to_string_lossy().to_string()))??;
+
+    // Collect rows as Vec<Vec<Xl>>
+    let rows: Vec<Vec<Xl>> = range.rows().map(|r| r.to_vec()).collect();
+    // Find first non-empty row for header
+    let mut header_idx: Option<usize> = None;
+    for (i, r) in rows.iter().enumerate() {
+        let all_empty = r.iter().all(|c| matches!(c, Xl::Empty));
+        if !all_empty { header_idx = Some(i); break; }
+    }
+    let header_idx = header_idx.ok_or_else(|| AppError::UnsupportedFormat(path.to_string_lossy().to_string()))?;
+
+    // Determine column count as max row length
+    let col_count = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    if col_count == 0 { return Err(AppError::UnsupportedFormat(path.to_string_lossy().to_string())); }
+
+    // Build header names from the header row
+    let mut headers: Vec<String> = Vec::with_capacity(col_count);
+    for i in 0..col_count {
+        let name = rows.get(header_idx)
+            .and_then(|r| r.get(i))
+            .map(|c| match c {
+                Xl::String(s) => s.trim().to_string(),
+                Xl::Float(v) => v.to_string(),
+                Xl::Int(v) => v.to_string(),
+                Xl::Bool(v) => v.to_string(),
+                Xl::DateTime(v) => v.to_string(),
+                _ => String::new(),
+            })
+            .unwrap_or_default();
+        let final_name = if name.is_empty() { format!("col_{}", i + 1) } else { name };
+        headers.push(final_name);
+    }
+
+    // Initialize column vectors
+    let mut columns: Vec<Vec<Option<String>>> = vec![Vec::new(); col_count];
+
+    for (ri, row) in rows.iter().enumerate() {
+        if ri <= header_idx { continue; } // skip header and any leading rows before it
+        for ci in 0..col_count {
+            let val_str_opt: Option<String> = row.get(ci).map(|c| match c {
+                Xl::Empty => None,
+                Xl::String(s) => Some(s.trim().to_string()),
+                Xl::Float(v) => Some(v.to_string()),
+                Xl::Int(v) => Some(v.to_string()),
+                Xl::Bool(v) => Some(v.to_string()),
+                Xl::DateTime(v) => Some(v.to_string()),
+                Xl::Duration(v) => Some(v.to_string()),
+                Xl::DateTimeIso(s) => Some(s.trim().to_string()),
+                Xl::DurationIso(s) => Some(s.trim().to_string()),
+                Xl::Error(_) => None,
+            }).flatten();
+            columns[ci].push(val_str_opt);
+        }
+    }
+
+    let mut series_vec: Vec<Series> = Vec::with_capacity(col_count);
+    for (i, name) in headers.iter().enumerate() {
+        let s = Series::new(name.as_str(), &columns[i]);
+        series_vec.push(s);
+    }
+    let df = DataFrame::new(series_vec)?;
+    Ok(df)
 }
 
 /// Loads an audio file and converts its first track to a DataFrame.

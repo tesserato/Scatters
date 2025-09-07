@@ -21,6 +21,9 @@ pub enum AppError {
     #[error("Failed to serialize data to JSON")]
     JsonSerialization(#[from] serde_json::Error),
 
+    #[error("Excel parsing error (Calamine)")]
+    Calamine(#[from] calamine::Error),
+
     #[error("Column '{0}' not found in the data")]
     ColumnNotFound(String),
 

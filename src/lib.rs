@@ -70,7 +70,7 @@ fn process_single_file(file_path: &Path, cli: &Cli) -> Result<()> {
 fn find_supported_files(path: &Path) -> Result<Vec<std::path::PathBuf>, AppError> {
     let mut files = Vec::new();
     let supported_extensions: Vec<&str> = vec![
-        "csv", "parquet", "json", "jsonl", "ndjson", "wav", "mp3", "flac",
+        "csv", "parquet", "json", "jsonl", "ndjson", "xlsx", "xls", "wav", "mp3", "flac",
     ];
 
     if path.is_file() {
