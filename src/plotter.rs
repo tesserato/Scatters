@@ -15,7 +15,8 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
         DataType::String => "category",
         _ => "value",
     };
-    let x_axis_label_extra = if x_axis_type == "value" { ", axisLabel: { formatter: formatNumber }" } else { "" };
+    // Extra formatter only for numeric X axis; color is always set at option-level.
+    let x_axis_label_extra = if x_axis_type == "value" { ", formatter: formatNumber" } else { "" };
 
     // Compute y-axis limits from data
     let (y_min_str, y_max_str) = {
@@ -47,16 +48,22 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
 <head>
     <meta charset="utf-8">
     <title>{}</title>
-    <script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
+<style>
+  html, body {{ margin: 0; padding: 0; height: 100%; }}
+</style>
 </head>
 <body>
-    <div id="main" style="width: 100%; height: 95vh;"></div>
+    <div id="main" style="width: 100vw; height: 100vh;"></div>
     <script>
         var AUTOSCALE_Y = {};
         var ANIMATIONS = {};
         var MAX_DECIMALS = {};
         var USE_WHITE = {};
         var THEME = USE_WHITE ? 'white' : 'dark';
+        var TITLE_COLOR = USE_WHITE ? '#333' : '#fff';
+        var AXIS_COLOR = USE_WHITE ? '#666' : '#fff';
+        var AXIS_LINE_COLOR = USE_WHITE ? '#999' : '#aaa';
         // Register themes (light and dark)
         echarts.registerTheme('white', {{
             backgroundColor: '#ffffff',
@@ -118,9 +125,9 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
         var myChart = echarts.init(document.getElementById('main'), THEME);
         myChart.setOption({{
             animation: ANIMATIONS,
-            title: {{ text: '{}', top: 5 }},
+            title: {{ text: '{}', top: 5, textStyle: {{ color: TITLE_COLOR }} }},
             tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'cross' }}, valueFormatter: formatNumber }},
-            legend: {{ type: 'scroll', top: 30 }},
+            legend: {{ type: 'scroll', top: 70 }},
             grid: {{ left: '2%', right: '2%', bottom: '6%', containLabel: true }},
             toolbox: {{
                 feature: {{
@@ -129,8 +136,8 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
                     saveAsImage: {{}}
                 }}
             }},
-            xAxis: {{ type: '{}', splitLine: {{ show: false }}{} }},
-            yAxis: {{ type: 'value', axisLine: {{ show: true }}, axisLabel: {{ formatter: formatNumber }}, min: {}, max: {} }},
+            xAxis: {{ type: '{}', splitLine: {{ show: false }}, axisLine: {{ lineStyle: {{ color: AXIS_LINE_COLOR }} }}, axisTick: {{ lineStyle: {{ color: AXIS_COLOR }} }}, axisLabel: {{ color: AXIS_COLOR{} }} }},
+            yAxis: {{ type: 'value', axisLine: {{ show: true, lineStyle: {{ color: AXIS_LINE_COLOR }} }}, axisTick: {{ lineStyle: {{ color: AXIS_COLOR }} }}, axisLabel: {{ formatter: formatNumber, color: AXIS_COLOR }}, min: {}, max: {} }},
             dataZoom: [
                 {{ type: 'inside', start: 0, end: 100 }},
                 {{ type: 'slider', start: 0, end: 100, height: 40 }}
