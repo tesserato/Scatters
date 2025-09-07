@@ -99,6 +99,10 @@ Y-axis selection:
   - DataFrame has `sample_index` (X) and `amplitude` (Y)
   - For multi-channel audio, samples are currently interleaved into the single `amplitude` series
 
+Notes on parsing and type inference:
+- String columns that look like datetimes are only cast to datetime if at least one value parses successfully. This avoids selecting an "all-null" datetime axis and producing empty plots.
+- String columns that look numeric are trimmed and parsed into Float64 if at least ~50% of their values parse successfully. This helps for CSVs that don't have headers and/or have numeric values with whitespace.
+
 ## Output HTML
 
 - Self-contained HTML with ECharts loaded from CDN

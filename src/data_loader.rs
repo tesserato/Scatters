@@ -17,9 +17,14 @@ pub fn load_dataframe(path: &Path) -> Result<DataFrame, AppError> {
         .to_lowercase();
 
     let mut df = match extension.as_str() {
-        "csv" => CsvReader::new(File::open(path)?)
-            .finish()
-            .map_err(AppError::from)?,
+        "csv" => {
+            // First, try reading assuming a header is present (Polars default)
+            let file = File::open(path)?;
+            let df = CsvReader::new(file)
+                .finish()
+                .map_err(AppError::from)?;
+            df
+        }
         "parquet" => ParquetReader::new(File::open(path)?)
             .finish()
             .map_err(AppError::from)?,
@@ -40,6 +45,8 @@ pub fn load_dataframe(path: &Path) -> Result<DataFrame, AppError> {
 
     // Attempt to auto-coerce string columns that look like datetimes
     try_cast_string_columns_to_datetime(&mut df)?;
+    // Next, try to coerce string columns that look numeric into Float64
+    try_cast_string_columns_to_numeric(&mut df)?;
     Ok(df)
 }
 
@@ -57,8 +64,39 @@ fn try_cast_string_columns_to_datetime(df: &mut DataFrame) -> Result<(), AppErro
         let s = df.column(&name)?.clone();
         if matches!(s.dtype(), DataType::String) {
             if let Ok(parsed) = s.cast(&DataType::Datetime(TimeUnit::Milliseconds, None)) {
-                // Replace the column with the parsed datetime series
-                df.replace(&name, parsed).map_err(AppError::from)?;
+                // Only accept the cast if it produced at least one non-null value
+                if parsed.null_count() < parsed.len() {
+                    df.replace(&name, parsed).map_err(AppError::from)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Try to cast string columns into Float64 when they look numeric.
+fn try_cast_string_columns_to_numeric(df: &mut DataFrame) -> Result<(), AppError> {
+    let col_names: Vec<String> = df
+        .get_columns()
+        .iter()
+        .map(|s| s.name().to_string())
+        .collect();
+
+    for name in col_names {
+        let s = df.column(&name)?.clone();
+        if matches!(s.dtype(), DataType::String) {
+            // Manually trim and parse floats from string values
+            let parsed_vals: Vec<Option<f64>> = s
+                .iter()
+                .map(|av| match av {
+                    AnyValue::String(t) => t.trim().parse::<f64>().ok(),
+                    AnyValue::StringOwned(ref t) => t.trim().parse::<f64>().ok(),
+                    _ => None,
+                })
+                .collect();
+            let parsed_series = Series::new(&name, parsed_vals);
+            if parsed_series.null_count() * 2 < parsed_series.len() {
+                df.replace(&name, parsed_series).map_err(AppError::from)?;
             }
         }
     }

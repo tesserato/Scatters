@@ -73,8 +73,11 @@ fn select_x_series(df: &DataFrame, cli: &Cli) -> Result<(Series, String), AppErr
     // Priority 4: Auto-detect first datetime column
     for series in df.get_columns() {
         if matches!(series.dtype(), DataType::Datetime(_, _) | DataType::Date) {
-            let name = series.name().to_string();
-            return Ok((series.clone(), name));
+            // Skip columns that are entirely null after casting attempts
+            if series.null_count() < series.len() {
+                let name = series.name().to_string();
+                return Ok((series.clone(), name));
+            }
         }
     }
 

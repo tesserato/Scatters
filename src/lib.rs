@@ -41,6 +41,14 @@ fn process_single_file(file_path: &Path, cli: &Cli) -> Result<()> {
     // 1. Load data into a DataFrame
     let df = data_loader::load_dataframe(file_path)?;
 
+    if cli.debug {
+        println!("  -> Detected columns:");
+        for s in df.get_columns() {
+            println!("     - {}: {:?}", s.name(), s.dtype());
+        }
+        println!("  -> Shape: {} rows x {} cols", df.height(), df.width());
+    }
+
     // 2. Prepare data for plotting (select X and Y series)
     let plot_data = processing::prepare_plot_data(df, cli, file_path)?;
 

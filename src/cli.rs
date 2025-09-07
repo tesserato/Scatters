@@ -44,4 +44,8 @@ pub struct Cli {
     /// Enable ECharts animations
     #[arg(long, default_value_t = false)]
     pub animations: bool,
+
+    /// Print debug info about detected columns and types
+    #[arg(long, default_value_t = false)]
+    pub debug: bool,
 }
