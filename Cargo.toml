@@ -1,6 +1,6 @@
 [package]
-name = "data_plotter"
-version = "0.1.0"
+name = "scatters"
+version = "0.0.0"
 edition = "2021"
 
 [dependencies]
