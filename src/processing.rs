@@ -10,6 +10,7 @@ pub struct PlotData {
     pub y_series_list: Vec<Series>,
     pub autoscale_y: bool,
     pub animations: bool,
+    pub max_decimals: i32,
 }
 
 /// Selects the X and Y series from a DataFrame based on user preferences.
@@ -35,6 +36,7 @@ pub fn prepare_plot_data(df: DataFrame, cli: &Cli, file_path: &Path) -> Result<P
         y_series_list,
         autoscale_y: !cli.no_autoscale_y,
         animations: cli.animations,
+        max_decimals: cli.max_decimals,
     })
 }
 

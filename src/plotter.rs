@@ -15,6 +15,7 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
         DataType::String => "category",
         _ => "value",
     };
+    let x_axis_label_extra = if x_axis_type == "value" { ", axisLabel: { formatter: formatNumber }" } else { "" };
 
     // Compute y-axis limits from data
     let (y_min_str, y_max_str) = {
@@ -39,6 +40,7 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
     // Generate HTML using simple string formatting
     let autoscale_js = if plot_data.autoscale_y { "true" } else { "false" };
     let animations_js = if plot_data.animations { "true" } else { "false" };
+    let max_decimals_js = plot_data.max_decimals;
     let html_content = format!(r#"<!DOCTYPE html>
 <html>
 <head>
@@ -51,11 +53,35 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
     <script>
         var AUTOSCALE_Y = {};
         var ANIMATIONS = {};
+        var MAX_DECIMALS = {};
+        // Number formatting with max decimals and scientific notation when appropriate
+        function trimZeros(str) {{
+            if (typeof str !== 'string') return str;
+            if (str.indexOf('e') !== -1 || str.indexOf('E') !== -1) {{
+                var parts = str.split(/[eE]/);
+                var mant = parts[0];
+                var exp = parts[1];
+                if (mant.indexOf('.') !== -1) {{
+                    mant = mant.replace(/\.0+$/,'').replace(/(\.[0-9]*[1-9])0+$/,'$1').replace(/\.$/, '');
+                }}
+                return mant + 'e' + exp;
+            }} else {{
+                return str.replace(/\.0+$/,'').replace(/(\.[0-9]*[1-9])0+$/,'$1').replace(/\.$/, '');
+            }}
+        }}
+        function formatNumber(val) {{
+            if (typeof val !== 'number' || !isFinite(val)) return String(val);
+            if (MAX_DECIMALS < 0) return String(val);
+            var abs = Math.abs(val);
+            var useSci = (abs !== 0) && (abs >= 1e6 || abs < 1e-4);
+            var s = useSci ? val.toExponential(MAX_DECIMALS) : val.toFixed(MAX_DECIMALS);
+            return trimZeros(s);
+        }}
         var myChart = echarts.init(document.getElementById('main'), 'light');
         myChart.setOption({{
             animation: ANIMATIONS,
-            title: {{ text: '{}' }},
-            tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'cross' }} }},
+            title: {{ text: '{}', top: 5 }},
+            tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'cross' }}, valueFormatter: formatNumber }},
             legend: {{ type: 'scroll', top: 30 }},
             grid: {{ left: '5%', right: '5%', bottom: '10%', containLabel: true }},
             toolbox: {{
@@ -65,8 +91,8 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
                     saveAsImage: {{}}
                 }}
             }},
-            xAxis: {{ type: '{}', splitLine: {{ show: false }} }},
-            yAxis: {{ type: 'value', axisLine: {{ show: true }}, min: {}, max: {} }},
+            xAxis: {{ type: '{}', splitLine: {{ show: false }}{} }},
+            yAxis: {{ type: 'value', axisLine: {{ show: true }}, axisLabel: {{ formatter: formatNumber }}, min: {}, max: {} }},
             dataZoom: [
                 {{ type: 'inside', start: 0, end: 100 }},
                 {{ type: 'slider', start: 0, end: 100, height: 40 }}
@@ -177,8 +203,10 @@ myChart.on('restore', function () {{
         plot_data.title,
         autoscale_js,
         animations_js,
+        max_decimals_js,
         plot_data.title,
         x_axis_type,
+        x_axis_label_extra,
         y_min_str,
         y_max_str,
         series_json_objects.join(",")

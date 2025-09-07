@@ -45,6 +45,10 @@ pub struct Cli {
     #[arg(long, default_value_t = false)]
     pub animations: bool,
 
+    /// Maximum number of decimal places for numeric formatting (-1 = unlimited)
+    #[arg(short = 'm', long = "max-decimals", default_value_t = 2)]
+    pub max_decimals: i32,
+
     /// Print debug info about detected columns and types
     #[arg(long, default_value_t = false)]
     pub debug: bool,
