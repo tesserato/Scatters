@@ -34,7 +34,7 @@ pub fn prepare_plot_data(df: DataFrame, cli: &Cli, file_path: &Path) -> Result<P
         x_series,
         y_series_list,
         autoscale_y: !cli.no_autoscale_y,
-        animations: !cli.no_animations,
+        animations: cli.animations,
     })
 }
 

@@ -41,7 +41,7 @@ pub struct Cli {
     #[arg(long, default_value_t = false)]
     pub no_autoscale_y: bool,
 
-    /// Disable ECharts animations for faster interaction
+    /// Enable ECharts animations
     #[arg(long, default_value_t = false)]
-    pub no_animations: bool,
+    pub animations: bool,
 }

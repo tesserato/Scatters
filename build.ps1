@@ -1,2 +1,2 @@
 # cargo run -- --help
-cargo run -- "./sample"
+cargo run -- "./sample" --no-autoscale-y

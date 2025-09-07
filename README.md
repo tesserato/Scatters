@@ -51,8 +51,6 @@ cargo run -- audio.wav
 # Disable dynamic Y autoscaling (keep initial padded range)
 cargo run -- sample/sample.csv --no-autoscale-y
 
-# Disable animations for faster interactions
-cargo run -- sample/sample.csv --no-animations
 ```
 
 Where outputs go:
@@ -75,7 +73,6 @@ Options:
   -c, --columns <COLUMNS>        Comma-separated list of columns to plot (Y-axis). If not provided, all numeric columns will be plotted
       --title <TITLE>            A custom title for the plot. Defaults to the input filename
       --no-autoscale-y           Disable dynamic Y-axis autoscaling on zoom (keeps initial Y range)
-      --no-animations            Disable ECharts animations for faster interaction
   -h, --help                     Print help
   -V, --version                  Print version
 ```
