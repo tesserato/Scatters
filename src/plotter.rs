@@ -82,7 +82,7 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
             animation: ANIMATIONS,
             title: {{ text: '{}', top: 5 }},
             tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'cross' }}, valueFormatter: formatNumber }},
-            legend: {{ type: 'scroll', top: 70 }},
+            legend: {{ type: 'scroll', top: 30 }},
             grid: {{ left: '2%', right: '2%', bottom: '6%', containLabel: true }},
             toolbox: {{
                 feature: {{
@@ -111,6 +111,7 @@ function applySymbolSizes(startPct, endPct) {{
             var pct = Math.max(0, Math.min(1, endPct - startPct));
             var opt = myChart.getOption();
             var series = opt.series || [];
+            var selected = (opt.legend && opt.legend[0] && opt.legend[0].selected) ? opt.legend[0].selected : null;
             var xAxis = (opt.xAxis && opt.xAxis[0]) ? opt.xAxis[0] : {{}};
             var xType = xAxis.type || 'value';
             var newSeries = series.map(function (s) {{
@@ -131,6 +132,7 @@ function applySymbolSizes(startPct, endPct) {{
                     var allXMin = Number.POSITIVE_INFINITY, allXMax = Number.NEGATIVE_INFINITY;
                     for (var i = 0; i < series.length; i++) {{
                         var s = series[i];
+                        if (selected && selected.hasOwnProperty && selected.hasOwnProperty(s.name) && !selected[s.name]) continue;
                         if (typeof s.metaXMin === 'number') allXMin = Math.min(allXMin, s.metaXMin);
                         if (typeof s.metaXMax === 'number') allXMax = Math.max(allXMax, s.metaXMax);
                     }}
@@ -142,6 +144,7 @@ function applySymbolSizes(startPct, endPct) {{
                         // Scan data with stride for performance
                         for (var i = 0; i < series.length; i++) {{
                             var s = series[i];
+                            if (selected && selected.hasOwnProperty && selected.hasOwnProperty(s.name) && !selected[s.name]) continue;
                             var d = s.data || [];
                             var estimate = (typeof s.metaN === 'number' ? s.metaN : d.length) * Math.max(0, endPct - startPct);
                             var stride = 1;
@@ -186,6 +189,18 @@ myChart.on('dataZoom', function () {{
             var opt = myChart.getOption();
             var dzArr = opt.dataZoom || [];
             if (!dzArr.length) {{ return; }}
+            var dz = dzArr[0];
+            var start = (dz.start != null) ? dz.start : 0;
+            var end = (dz.end != null) ? dz.end : 100;
+            var startPct = Math.max(0, Math.min(1, start / 100));
+            var endPct = Math.max(0, Math.min(1, end / 100));
+applySymbolSizes(startPct, endPct);
+        }});
+        // Re-apply autoscale on legend visibility changes
+myChart.on('legendselectchanged', function () {{
+            var opt = myChart.getOption();
+            var dzArr = opt.dataZoom || [];
+            if (!dzArr.length) {{ applySymbolSizes(0.0, 1.0); return; }}
             var dz = dzArr[0];
             var start = (dz.start != null) ? dz.start : 0;
             var end = (dz.end != null) ? dz.end : 100;
