@@ -82,8 +82,8 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
             animation: ANIMATIONS,
             title: {{ text: '{}', top: 5 }},
             tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'cross' }}, valueFormatter: formatNumber }},
-            legend: {{ type: 'scroll', top: 30 }},
-            grid: {{ left: '5%', right: '5%', bottom: '10%', containLabel: true }},
+            legend: {{ type: 'scroll', top: 70 }},
+            grid: {{ left: '2%', right: '2%', bottom: '6%', containLabel: true }},
             toolbox: {{
                 feature: {{
                     dataZoom: {{ yAxisIndex: 'none' }},
