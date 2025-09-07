@@ -11,6 +11,7 @@ pub struct PlotData {
     pub autoscale_y: bool,
     pub animations: bool,
     pub max_decimals: i32,
+    pub use_white_theme: bool,
 }
 
 /// Selects the X and Y series from a DataFrame based on user preferences.
@@ -37,6 +38,7 @@ pub fn prepare_plot_data(df: DataFrame, cli: &Cli, file_path: &Path) -> Result<P
         autoscale_y: !cli.no_autoscale_y,
         animations: cli.animations,
         max_decimals: cli.max_decimals,
+        use_white_theme: cli.white_theme,
     })
 }
 

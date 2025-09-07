@@ -52,4 +52,8 @@ pub struct Cli {
     /// Print debug info about detected columns and types
     #[arg(long, default_value_t = false)]
     pub debug: bool,
+
+    /// Use white (light) theme instead of dark (dark is default)
+    #[arg(long = "white-theme", default_value_t = false)]
+    pub white_theme: bool,
 }

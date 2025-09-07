@@ -108,6 +108,8 @@ Notes on parsing and type inference:
 - Self-contained HTML with ECharts loaded from CDN
 - Interactive features: zoom/pan (dataZoom), legend scroll, save-as-image, restore
 - X-axis type is set automatically (time, category, or value) based on the chosen X series
+- Themes: dark (default) and white (enable with `--white-theme`)
+- Numeric formatting: `-m/--max-decimals` controls decimals; `-1` disables the limit; scientific notation when appropriate
 
 ## Project structure (brief)
 

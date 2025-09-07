@@ -41,6 +41,7 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
     let autoscale_js = if plot_data.autoscale_y { "true" } else { "false" };
     let animations_js = if plot_data.animations { "true" } else { "false" };
     let max_decimals_js = plot_data.max_decimals;
+    let use_white_js = if plot_data.use_white_theme { "true" } else { "false" };
     let html_content = format!(r#"<!DOCTYPE html>
 <html>
 <head>
@@ -54,6 +55,43 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
         var AUTOSCALE_Y = {};
         var ANIMATIONS = {};
         var MAX_DECIMALS = {};
+        var USE_WHITE = {};
+        var THEME = USE_WHITE ? 'white' : 'dark';
+        // Register themes (light and dark)
+        echarts.registerTheme('white', {{
+            backgroundColor: '#ffffff',
+            textStyle: {{ color: '#333' }},
+            color: ['#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f','#edc949','#af7aa1','#ff9da7','#9c755f','#bab0ab'],
+            legend: {{ textStyle: {{ color: '#333' }} }},
+            xAxis: {{
+                axisLabel: {{ color: '#666' }},
+                axisLine: {{ lineStyle: {{ color: '#999' }} }},
+                splitLine: {{ lineStyle: {{ color: '#eee' }} }}
+            }},
+            yAxis: {{
+                axisLabel: {{ color: '#666' }},
+                axisLine: {{ lineStyle: {{ color: '#999' }} }},
+                splitLine: {{ lineStyle: {{ color: '#eee' }} }}
+            }},
+            tooltip: {{ backgroundColor: '#ffffff', textStyle: {{ color: '#333' }} }}
+        }});
+        echarts.registerTheme('dark', {{
+            backgroundColor: '#121212',
+            textStyle: {{ color: '#dddddd' }},
+            color: ['#7eb6ff','#ffb366','#ff7b84','#6cd4d2','#6edb8f','#ffe34d','#c69cd9','#ffb3bd','#b8977a','#d0d0cf'],
+            legend: {{ textStyle: {{ color: '#cccccc' }} }},
+            xAxis: {{
+                axisLabel: {{ color: '#bbbbbb' }},
+                axisLine: {{ lineStyle: {{ color: '#888888' }} }},
+                splitLine: {{ lineStyle: {{ color: '#333333' }} }}
+            }},
+            yAxis: {{
+                axisLabel: {{ color: '#bbbbbb' }},
+                axisLine: {{ lineStyle: {{ color: '#888888' }} }},
+                splitLine: {{ lineStyle: {{ color: '#333333' }} }}
+            }},
+            tooltip: {{ backgroundColor: '#1e1e1e', textStyle: {{ color: '#dddddd' }} }}
+        }});
         // Number formatting with max decimals and scientific notation when appropriate
         function trimZeros(str) {{
             if (typeof str !== 'string') return str;
@@ -77,7 +115,7 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
             var s = useSci ? val.toExponential(MAX_DECIMALS) : val.toFixed(MAX_DECIMALS);
             return trimZeros(s);
         }}
-        var myChart = echarts.init(document.getElementById('main'), 'light');
+        var myChart = echarts.init(document.getElementById('main'), THEME);
         myChart.setOption({{
             animation: ANIMATIONS,
             title: {{ text: '{}', top: 5 }},
@@ -219,6 +257,7 @@ myChart.on('restore', function () {{
         autoscale_js,
         animations_js,
         max_decimals_js,
+        use_white_js,
         plot_data.title,
         x_axis_type,
         x_axis_label_extra,
