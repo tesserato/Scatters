@@ -92,7 +92,6 @@ fn try_cast_string_columns_to_datetime(df: &mut DataFrame) -> Result<(), AppErro
 
 /// Attempt to parse a String Series into Datetime (ms) with many formats.
 fn parse_string_series_to_datetime(s: &Series) -> Option<Series> {
-    use chrono::{NaiveDate, NaiveDateTime};
     // Generate candidate format strings
     let seps: &[char] = &['-', '/', '.', ' '];
     let dt_seps: &[&str] = &["T", " "];
@@ -164,14 +163,17 @@ fn try_parse_many(s: &str, fmts: &[String]) -> Option<i64> {
         let has_time = f.contains("%H");
         if has_time {
             if let Ok(dt) = NaiveDateTime::parse_from_str(s, f) {
-                let secs = dt.timestamp();
-                let nanos = dt.timestamp_nanos_opt().unwrap_or(secs * 1_000_000_000);
+                let secs = dt.and_utc().timestamp();
+                let nanos = dt
+                    .and_utc()
+                    .timestamp_nanos_opt()
+                    .unwrap_or(secs * 1_000_000_000);
                 return Some((nanos / 1_000_000) as i64);
             }
         } else {
             if let Ok(d) = NaiveDate::parse_from_str(s, f) {
                 let dt = d.and_hms_opt(0, 0, 0)?;
-                let secs = dt.timestamp();
+                let secs = dt.and_utc().timestamp();
                 return Some(secs * 1000);
             }
         }
