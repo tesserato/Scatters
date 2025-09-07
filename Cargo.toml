@@ -23,6 +23,9 @@ walkdir = "2.5.0"
 anyhow = "1.0.82"
 thiserror = "1.0.59"
 
+# Datetime parsing
+chrono = { version = "0.4", default-features = false, features = ["alloc"] }
+
 # Type-safe HTML generation
 hypertext = "0.2.0"
 

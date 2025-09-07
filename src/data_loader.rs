@@ -51,10 +51,11 @@ pub fn load_dataframe(path: &Path) -> Result<DataFrame, AppError> {
     Ok(df)
 }
 
-/// Try to cast string columns into Datetime using Polars' native casting.
+/// Try to cast string columns into Datetime using multiple strategies.
+/// 1) Polars native cast (RFC-like formats)
+/// 2) Heuristic parser for many common formats: YYYY{sep}MM{sep}DD or DD{sep}MM{sep}YYYY,
+///    optionally followed by time (HH, HH:MM, HH:MM:SS) and date-time separators of 'T' or space.
 fn try_cast_string_columns_to_datetime(df: &mut DataFrame) -> Result<(), AppError> {
-    use polars::prelude::*;
-
     let col_names: Vec<String> = df
         .get_columns()
         .iter()
@@ -64,15 +65,105 @@ fn try_cast_string_columns_to_datetime(df: &mut DataFrame) -> Result<(), AppErro
     for name in col_names {
         let s = df.column(&name)?.clone();
         if matches!(s.dtype(), DataType::String) {
+            let mut accepted = false;
+            // Strategy 1: native cast
             if let Ok(parsed) = s.cast(&DataType::Datetime(TimeUnit::Milliseconds, None)) {
-                // Only accept the cast if it produced at least one non-null value
-                if parsed.null_count() < parsed.len() {
+                if parsed.null_count() < parsed.len() { // at least one parsed
                     df.replace(&name, parsed).map_err(AppError::from)?;
+                    accepted = true;
+                }
+            }
+            // Strategy 2: heuristic formats
+            if !accepted {
+                if let Some(series_dt) = parse_string_series_to_datetime(&s) {
+                    df.replace(&name, series_dt).map_err(AppError::from)?;
                 }
             }
         }
     }
     Ok(())
+}
+
+/// Attempt to parse a String Series into Datetime (ms) with many formats.
+fn parse_string_series_to_datetime(s: &Series) -> Option<Series> {
+    use chrono::{NaiveDate, NaiveDateTime};
+    // Generate candidate format strings
+    let seps: &[char] = &[ '-', '/', '.', ' ' ];
+    let dt_seps: &[&str] = &["T", " "];
+    let mut fmts: Vec<String> = Vec::new();
+    for &sep in seps {
+        let sep_s = sep.to_string();
+        let ymd = format!("%Y{sep}%m{sep}%d", sep=sep_s);
+        let dmy = format!("%d{sep}%m{sep}%Y", sep=sep_s);
+        // date-only
+        fmts.push(ymd.clone());
+        fmts.push(dmy.clone());
+        for &dts in dt_seps {
+            // time variants
+            for t in ["%H", "%H:%M", "%H:%M:%S"].iter() {
+                fmts.push(format!("{}{}{}", ymd, dts, t));
+                fmts.push(format!("{}{}{}", dmy, dts, t));
+            }
+        }
+    }
+    // Helper: normalize whitespace (collapse runs)
+    fn normalize_spaces(input: &str) -> std::borrow::Cow<'_, str> {
+        let trimmed = input.trim();
+        if trimmed.contains(char::is_whitespace) {
+            let s = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+            std::borrow::Cow::Owned(s)
+        } else {
+            std::borrow::Cow::Borrowed(trimmed)
+        }
+    }
+
+    // Try parsing using fmts; collect ms since epoch
+    let mut parsed: Vec<Option<i64>> = Vec::with_capacity(s.len());
+    for av in s.iter() {
+        let ms_opt = match av {
+            AnyValue::String(v) => {
+                let norm = normalize_spaces(v);
+                try_parse_many(&norm, &fmts)
+            }
+            AnyValue::StringOwned(ref v) => {
+                let norm = normalize_spaces(v);
+                try_parse_many(&norm, &fmts)
+            }
+            _ => None,
+        };
+        parsed.push(ms_opt);
+    }
+    let non_null = parsed.iter().filter(|v| v.is_some()).count();
+    if non_null == 0 { return None; }
+
+    // Build series -> Int64 -> Datetime(ms)
+    let ca: Int64Chunked = parsed.into_iter().collect();
+    let series = ca.into_series();
+    let casted = series.cast(&DataType::Datetime(TimeUnit::Milliseconds, None)).ok()?;
+    Some(casted)
+}
+
+fn try_parse_many(s: &str, fmts: &[String]) -> Option<i64> {
+    use chrono::{NaiveDate, NaiveDateTime};
+    // Try datetime formats first
+    for f in fmts {
+        // If format contains any time specifier, use NaiveDateTime; otherwise NaiveDate
+        let has_time = f.contains("%H");
+        if has_time {
+            if let Ok(dt) = NaiveDateTime::parse_from_str(s, f) {
+                let secs = dt.timestamp();
+                let nanos = dt.timestamp_nanos_opt().unwrap_or(secs * 1_000_000_000);
+                return Some((nanos / 1_000_000) as i64);
+            }
+        } else {
+            if let Ok(d) = NaiveDate::parse_from_str(s, f) {
+                let dt = d.and_hms_opt(0, 0, 0)?;
+                let secs = dt.timestamp();
+                return Some(secs * 1000);
+            }
+        }
+    }
+    None
 }
 
 /// Try to cast string columns into Float64 when they look numeric.
