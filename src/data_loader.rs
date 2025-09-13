@@ -192,6 +192,17 @@ fn try_cast_string_columns_to_numeric(df: &mut DataFrame) -> Result<(), AppError
     for name in col_names {
         let s = df.column(&name)?.clone();
         if matches!(s.dtype(), DataType::String) {
+            // Check if the column contains the `|` symbol
+            let contains_pipe = s.iter().any(|av| match av {
+                AnyValue::String(t) => t.trim() == "|",
+                AnyValue::StringOwned(ref t) => t.trim() == "|",
+                _ => false,
+            });
+
+            if contains_pipe {
+                continue; // Skip numeric conversion for this column
+            }
+
             // Manually trim and parse floats from string values
             let parsed_vals: Vec<Option<f64>> = s
                 .iter()
@@ -203,10 +214,10 @@ fn try_cast_string_columns_to_numeric(df: &mut DataFrame) -> Result<(), AppError
                 .collect();
             let parsed_series = Series::new(&name, parsed_vals);
 
-            // Only replace if the number of successfully parsed values is greater than
-            // the number of failed values (nulls). This avoids converting columns
-            // that are mostly non-numeric but contain some numbers.
-            if parsed_series.null_count() * 2 < parsed_series.len() {
+            // Only replace if all non-null string values were successfully parsed as numeric.
+            let original_non_nulls = s.len() - s.null_count();
+            let parsed_numeric_count = parsed_series.len() - parsed_series.null_count();
+            if original_non_nulls > 0 && parsed_numeric_count == original_non_nulls {
                 df.replace(&name, parsed_series).map_err(AppError::from)?;
             }
         }

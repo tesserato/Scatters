@@ -108,8 +108,20 @@ fn select_y_series(df: &DataFrame, cli: &Cli, x_name: &str) -> Result<Vec<Series
     // Case 2: Default - use all numeric columns
     else {
         for series in df.get_columns() {
-            if series.name() != x_name && series.dtype().is_numeric() {
-                y_series_list.push(series.clone());
+            if series.name() != x_name {
+                let is_numeric = series.dtype().is_numeric();
+                let is_string_with_pipe = if let DataType::String = series.dtype() {
+                    series.iter().any(|av| match av {
+                        AnyValue::String(s) => s.contains('|'),
+                        _ => false,
+                    })
+                } else {
+                    false
+                };
+
+                if is_numeric || is_string_with_pipe {
+                    y_series_list.push(series.clone());
+                }
             }
         }
     }

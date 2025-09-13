@@ -16,7 +16,11 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
         _ => "value",
     };
     // Extra formatter only for numeric X axis; color is always set at option-level.
-    let x_axis_label_extra = if x_axis_type == "value" { ", formatter: formatNumber" } else { "" };
+    let x_axis_label_extra = if x_axis_type == "value" {
+        ", formatter: formatNumber"
+    } else {
+        ""
+    };
 
     // Compute y-axis limits from data
     let (y_min_str, y_max_str) = {
@@ -25,8 +29,16 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
         for ys in &plot_data.y_series_list {
             if let Ok(casted) = ys.cast(&DataType::Float64) {
                 let ca = casted.f64().unwrap();
-                if let Some(mn) = ca.min() { if mn.is_finite() { min_v = min_v.min(mn); } }
-                if let Some(mx) = ca.max() { if mx.is_finite() { max_v = max_v.max(mx); } }
+                if let Some(mn) = ca.min() {
+                    if mn.is_finite() {
+                        min_v = min_v.min(mn);
+                    }
+                }
+                if let Some(mx) = ca.max() {
+                    if mx.is_finite() {
+                        max_v = max_v.max(mx);
+                    }
+                }
             }
         }
         if min_v.is_finite() && max_v.is_finite() {
@@ -39,11 +51,24 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
     };
 
     // Generate HTML using simple string formatting
-    let autoscale_js = if plot_data.autoscale_y { "true" } else { "false" };
-    let animations_js = if plot_data.animations { "true" } else { "false" };
+    let autoscale_js = if plot_data.autoscale_y {
+        "true"
+    } else {
+        "false"
+    };
+    let animations_js = if plot_data.animations {
+        "true"
+    } else {
+        "false"
+    };
     let max_decimals_js = plot_data.max_decimals;
-    let use_white_js = if plot_data.use_white_theme { "true" } else { "false" };
-    let html_content = format!(r#"<!DOCTYPE html>
+    let use_white_js = if plot_data.use_white_theme {
+        "true"
+    } else {
+        "false"
+    };
+    let html_content = format!(
+        r#"<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
@@ -259,7 +284,7 @@ myChart.on('restore', function () {{
         }});
     </script>
 </body>
-</html>"#, 
+</html>"#,
         plot_data.title,
         autoscale_js,
         animations_js,
@@ -284,69 +309,92 @@ fn build_series_json(plot_data: &PlotData) -> Result<Vec<String>, AppError> {
     for y_series in &plot_data.y_series_list {
         // Zip X and Y series into [x, y] pairs, filtering out nulls
         let mut data_points: Vec<[Value; 2]> = Vec::new();
+        let mut mark_lines_data: Vec<Value> = Vec::new();
         let mut x_min = f64::INFINITY;
         let mut x_max = f64::NEG_INFINITY;
         let mut y_min = f64::INFINITY;
         let mut y_max = f64::NEG_INFINITY;
 
         for (x_val, y_val) in x_series.iter().zip(y_series.iter()) {
-            if !matches!(x_val, AnyValue::Null) && !matches!(y_val, AnyValue::Null) {
-                // JSON values for rendering
-                let x_json = any_value_to_json_value(x_val.clone());
-                let y_json = any_value_to_json_value(y_val.clone());
-                data_points.push([x_json, y_json]);
-
-                // Numeric values for meta range calculations (only numeric/time)
-                if let (Some(xn), Some(yn)) = (any_value_to_f64(x_val), any_value_to_f64(y_val)) {
-                    if xn.is_finite() {
-                        x_min = x_min.min(xn);
-                        x_max = x_max.max(xn);
+            if !matches!(x_val, AnyValue::Null) {
+                if let AnyValue::String(s) = y_val {
+                    if s == "|" {
+                        // Create a markLine for the vertical line
+                        let color = "#c23531";
+                        mark_lines_data.push(serde_json::json!({
+                            "xAxis": any_value_to_json_value(x_val.clone()),
+                            "lineStyle": {
+                                "color": color,
+                                "width": 2,
+                                "type": "solid",
+                            },
+                            "symbol": "none"
+                        }));
+                        continue; // Skip adding to data_points
                     }
-                    if yn.is_finite() {
-                        y_min = y_min.min(yn);
-                        y_max = y_max.max(yn);
+                }
+
+                if !matches!(y_val, AnyValue::Null) {
+                    // JSON values for rendering
+                    let x_json = any_value_to_json_value(x_val.clone());
+                    let y_json = any_value_to_json_value(y_val.clone());
+                    data_points.push([x_json, y_json]);
+
+                    // Numeric values for meta range calculations (only numeric/time)
+                    if let (Some(xn), Some(yn)) = (any_value_to_f64(x_val), any_value_to_f64(y_val))
+                    {
+                        if xn.is_finite() {
+                            x_min = x_min.min(xn);
+                            x_max = x_max.max(xn);
+                        }
+                        if yn.is_finite() {
+                            y_min = y_min.min(yn);
+                            y_max = y_max.max(yn);
+                        }
                     }
                 }
             }
         }
 
-        let data_json = serde_json::to_string(&data_points)?;
         let n_points = data_points.len();
-        let x_min_str = if x_min.is_finite() { format!("{}", x_min) } else { "null".to_string() };
-        let x_max_str = if x_max.is_finite() { format!("{}", x_max) } else { "null".to_string() };
-        let y_min_str = if y_min.is_finite() { format!("{}", y_min) } else { "null".to_string() };
-        let y_max_str = if y_max.is_finite() { format!("{}", y_max) } else { "null".to_string() };
+        let x_min_str = if x_min.is_finite() {
+            format!("{}", x_min)
+        } else {
+            "null".to_string()
+        };
+        let x_max_str = if x_max.is_finite() {
+            format!("{}", x_max)
+        } else {
+            "null".to_string()
+        };
+        let y_min_str = if y_min.is_finite() {
+            format!("{}", y_min)
+        } else {
+            "null".to_string()
+        };
+        let y_max_str = if y_max.is_finite() {
+            format!("{}", y_max)
+        } else {
+            "null".to_string()
+        };
 
-        let series_obj = format!(
-            r#"{{
-                name: '{}',
-                type: 'scatter',
-                metaN: {},
-                metaXMin: {},
-                metaXMax: {},
-                metaYMin: {},
-                metaYMax: {},
-                symbolSize: (function() {{
-                    const n = {};
-                    return function(/* value, params */) {{
-                        // Larger for small n, smaller for large n; hard minimum of 4px, cap ~36px
-                        return Math.max(4, Math.min(36, (14 - Math.log10(n + 1) * 3.5) * 2));
-                    }}
-                }})(),
-                large: true,
-                largeThreshold: 2000,
-                data: {}
-            }}"#,
-            y_series.name(),
-            n_points,
-            x_min_str,
-            x_max_str,
-            y_min_str,
-            y_max_str,
-            n_points,
-            data_json
-        );
-        series_objects.push(series_obj);
+        let series_obj = serde_json::json!({
+            "name": y_series.name(),
+            "type": "scatter",
+            "metaN": n_points,
+            "metaXMin": x_min_str,
+            "metaXMax": x_max_str,
+            "metaYMin": y_min_str,
+            "metaYMax": y_max_str,
+            "symbolSize": 10,
+            "large": true,
+            "largeThreshold": 2000,
+            "data": data_points,
+            "markLine": { "data": mark_lines_data, "symbol": "none" }
+        });
+
+        let series_obj_str = serde_json::to_string(&series_obj)?;
+        series_objects.push(series_obj_str);
     }
     Ok(series_objects)
 }
