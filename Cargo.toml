@@ -25,14 +25,6 @@ polars = { version = "0.40.0", features = [
     "dtype-datetime",
     "dtype-date",
 ] }
-polars = { version = "0.40.0", features = [
-    "lazy",
-    "csv",
-    "parquet",
-    "json",
-    "dtype-datetime",
-    "dtype-date",
-] }
 
 # Excel file processing
 calamine = "0.22"
@@ -59,4 +51,3 @@ hypertext = "0.2.0"
 # JSON serialization for embedding data in HTML/JS
 serde = { version = "1.0.200", features = ["derive"] }
 serde_json = "1.0.116"
-
