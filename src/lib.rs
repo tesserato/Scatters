@@ -100,8 +100,8 @@ fn generate_output_path(input_path: &Path, cli: &Cli) -> std::path::PathBuf {
     let stem = input_path.file_stem().unwrap_or_default().to_string_lossy();
     let default_output_name = format!("{}.html", stem);
 
-    if let Some(output_dir) = &cli.output_dir {
-        output_dir.join(default_output_name)
+    if let Some(output) = &cli.output {
+        output.join(default_output_name)
     } else {
         // Default to saving next to the input file
         input_path.with_file_name(default_output_name)

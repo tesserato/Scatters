@@ -14,35 +14,35 @@ pub struct Cli {
 
     /// Directory to save the generated HTML plots.
     /// Defaults to saving next to each input file.
-    #[arg(short, long)]
-    pub output_dir: Option<PathBuf>,
+    #[arg(short = 'o', long)]
+    pub output: Option<PathBuf>,
 
     /// Name of the column to use as the index (X-axis).
     /// Highest priority for index selection.
-    #[arg(long)]
+    #[arg(short = 'i', long)]
     pub index: Option<String>,
 
     /// Use the first column of the data as the index.
     /// Overridden by --index.
-    #[arg(long, default_value_t = false)]
+    #[arg(short = 'f', long, default_value_t = false)]
     pub use_first_column: bool,
 
     /// Comma-separated list of columns to plot (Y-axis).
     /// If not provided, all numeric columns will be plotted.
-    #[arg(short, long, use_value_delimiter = true, value_delimiter = ',')]
+    #[arg(short = 'c', long, use_value_delimiter = true, value_delimiter = ',')]
     pub columns: Option<Vec<String>>,
 
     /// A custom title for the plot.
     /// Defaults to the input filename.
-    #[arg(long)]
+    #[arg(short = 't', long)]
     pub title: Option<String>,
 
     /// Disable dynamic Y-axis autoscaling (keep initial 10% padded range)
-    #[arg(long, default_value_t = false)]
+    #[arg(short = 'n', long, default_value_t = false)]
     pub no_autoscale_y: bool,
 
     /// Enable ECharts animations
-    #[arg(long, default_value_t = false)]
+    #[arg(short = 'a', long, default_value_t = false)]
     pub animations: bool,
 
     /// Maximum number of decimal places for numeric formatting (-1 = unlimited)
@@ -50,10 +50,10 @@ pub struct Cli {
     pub max_decimals: i32,
 
     /// Print debug info about detected columns and types
-    #[arg(long, default_value_t = false)]
+    #[arg(short = 'd', long, default_value_t = false)]
     pub debug: bool,
 
     /// Use white (light) theme instead of dark (dark is default)
-    #[arg(long = "white-theme", default_value_t = false)]
+    #[arg(short = 'w', long = "white-theme", default_value_t = false)]
     pub white_theme: bool,
 }

@@ -1,3 +1,8 @@
-# cargo run -- --help
+$outputFolder = "./outputs"
+
+Remove-Item -r $outputFolder
 cargo check
-cargo run -- "./sample" --debug
+write-host ""
+cargo run -- --help
+write-host ""
+cargo run -- "./sample" --debug --output $outputFolder
