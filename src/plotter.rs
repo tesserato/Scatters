@@ -1,13 +1,40 @@
 use crate::error::AppError;
 use crate::processing::PlotData;
-// Removed hypertext dependency - using simple string formatting
+use askama::Template;
 use polars::prelude::*;
 use serde_json::Value;
 
+// plot_data.title,
+// autoscale_js,
+// animations_js,
+// max_decimals_js,
+// use_white_js,
+// plot_data.title,
+// x_axis_type,
+// x_axis_label_extra,
+// y_min_str,
+// y_max_str,
+// series_json_objects.join(",")
+
+#[derive(Template)]
+#[template(path = "page.html")] // using the template in this path, relative
+struct HelloTemplate<'a> {
+    title: &'a str,
+    autoscale_y: &'a bool,
+    animations: &'a bool,
+    max_decimals: &'a i32,
+    use_white_theme: &'a bool,
+    x_axis_type: &'a str,
+    x_axis_label_extra: &'a str,
+    y_min: &'a f32,
+    y_max: &'a f32,
+    series_json: &'a str,
+}
+
 /// Generates a self-contained HTML file with an interactive ECharts plot.
-pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
+pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, askama::Error> {
     // Convert Polars Series into a format suitable for ECharts JSON
-    let series_json_objects = build_series_json(plot_data)?;
+    let series_json_objects = build_series_json(plot_data).unwrap();
 
     // Determine x-axis type based on data
     let x_axis_type = match plot_data.x_series.dtype() {
@@ -51,254 +78,37 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
     };
 
     // Generate HTML using simple string formatting
-    let autoscale_js = if plot_data.autoscale_y {
-        "true"
-    } else {
-        "false"
-    };
-    let animations_js = if plot_data.animations {
-        "true"
-    } else {
-        "false"
-    };
-    let max_decimals_js = plot_data.max_decimals;
-    let use_white_js = if plot_data.use_white_theme {
-        "true"
-    } else {
-        "false"
-    };
-    let html_content = format!(
-        r#"<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>{}</title>
-<script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
-<style>
-  html, body {{ margin: 0; padding: 0; height: 100%; }}
-</style>
-</head>
-<body>
-    <div id="main" style="width: 100vw; height: 100vh;"></div>
-    <script>
-        var AUTOSCALE_Y = {};
-        var ANIMATIONS = {};
-        var MAX_DECIMALS = {};
-        var USE_WHITE = {};
-        var THEME = USE_WHITE ? 'white' : 'dark';
-        var TITLE_COLOR = USE_WHITE ? '#333' : '#fff';
-        var AXIS_COLOR = USE_WHITE ? '#666' : '#fff';
-        var AXIS_LINE_COLOR = USE_WHITE ? '#999' : '#aaa';
-        // Register themes (light and dark)
-        echarts.registerTheme('white', {{
-            backgroundColor: '#ffffff',
-            textStyle: {{ color: '#333' }},
-            color: ['#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f','#edc949','#af7aa1','#ff9da7','#9c755f','#bab0ab'],
-            legend: {{ textStyle: {{ color: '#333' }} }},
-            xAxis: {{
-                axisLabel: {{ color: '#666' }},
-                axisLine: {{ lineStyle: {{ color: '#999' }} }},
-                splitLine: {{ lineStyle: {{ color: '#eee' }} }}
-            }},
-            yAxis: {{
-                axisLabel: {{ color: '#666' }},
-                axisLine: {{ lineStyle: {{ color: '#999' }} }},
-                splitLine: {{ lineStyle: {{ color: '#eee' }} }}
-            }},
-            tooltip: {{ backgroundColor: '#ffffff', textStyle: {{ color: '#333' }} }}
-        }});
-        echarts.registerTheme('dark', {{
-            backgroundColor: '#121212',
-            textStyle: {{ color: '#dddddd' }},
-            color: ['#7eb6ff','#ffb366','#ff7b84','#6cd4d2','#6edb8f','#ffe34d','#c69cd9','#ffb3bd','#b8977a','#d0d0cf'],
-            legend: {{ textStyle: {{ color: '#cccccc' }} }},
-            xAxis: {{
-                axisLabel: {{ color: '#bbbbbb' }},
-                axisLine: {{ lineStyle: {{ color: '#888888' }} }},
-                splitLine: {{ lineStyle: {{ color: '#333333' }} }}
-            }},
-            yAxis: {{
-                axisLabel: {{ color: '#bbbbbb' }},
-                axisLine: {{ lineStyle: {{ color: '#888888' }} }},
-                splitLine: {{ lineStyle: {{ color: '#333333' }} }}
-            }},
-            tooltip: {{ backgroundColor: '#1e1e1e', textStyle: {{ color: '#dddddd' }} }}
-        }});
-        // Number formatting with max decimals and scientific notation when appropriate
-        function trimZeros(str) {{
-            if (typeof str !== 'string') return str;
-            if (str.indexOf('e') !== -1 || str.indexOf('E') !== -1) {{
-                var parts = str.split(/[eE]/);
-                var mant = parts[0];
-                var exp = parts[1];
-                if (mant.indexOf('.') !== -1) {{
-                    mant = mant.replace(/\.0+$/,'').replace(/(\.[0-9]*[1-9])0+$/,'$1').replace(/\.$/, '');
-                }}
-                return mant + 'e' + exp;
-            }} else {{
-                return str.replace(/\.0+$/,'').replace(/(\.[0-9]*[1-9])0+$/,'$1').replace(/\.$/, '');
-            }}
-        }}
-        function formatNumber(val) {{
-            if (typeof val !== 'number' || !isFinite(val)) return String(val);
-            if (MAX_DECIMALS < 0) return String(val);
-            var abs = Math.abs(val);
-            var useSci = (abs !== 0) && (abs >= 1e6 || abs < 1e-4);
-            var s = useSci ? val.toExponential(MAX_DECIMALS) : val.toFixed(MAX_DECIMALS);
-            return trimZeros(s);
-        }}
-        var myChart = echarts.init(document.getElementById('main'), THEME);
-        myChart.setOption({{
-            animation: ANIMATIONS,
-            title: {{ text: '{}', top: 5, textStyle: {{ color: TITLE_COLOR }} }},
-            tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'cross' }}, valueFormatter: formatNumber }},
-            legend: {{ type: 'scroll', top: 30 }},
-            grid: {{ left: '2%', right: '2%', bottom: '6%', containLabel: true }},
-            toolbox: {{
-                feature: {{
-                    dataZoom: {{ yAxisIndex: 'none' }},
-                    restore: {{}},
-                    saveAsImage: {{}}
-                }}
-            }},
-            xAxis: {{ type: '{}', splitLine: {{ show: false }}, axisLine: {{ lineStyle: {{ color: AXIS_LINE_COLOR }} }}, axisTick: {{ lineStyle: {{ color: AXIS_COLOR }} }}, axisLabel: {{ color: AXIS_COLOR{} }} }},
-            yAxis: {{ type: 'value', axisLine: {{ show: true, lineStyle: {{ color: AXIS_LINE_COLOR }} }}, axisTick: {{ lineStyle: {{ color: AXIS_COLOR }} }}, axisLabel: {{ formatter: formatNumber, color: AXIS_COLOR }}, min: {}, max: {} }},
-            dataZoom: [
-                {{ type: 'inside', start: 0, end: 100 }},
-                {{ type: 'slider', start: 0, end: 100, height: 40 }}
-            ],
-            series: [ {} ]
-        }});
-        // Helper to compute size for visible window
-function computeSize(n, pct) {{
-            pct = Math.max(0, Math.min(1, pct));
-            var visibleN = (pct <= 0) ? 1 : Math.max(1, Math.round(n * pct));
-return Math.max(1, Math.min(36, (14 - Math.log10(visibleN + 1) * 3.5) * 2));
-        }}
+    // let autoscale_js = if plot_data.autoscale_y {
+    //     "true"
+    // } else {
+    //     "false"
+    // };
+    // let animations_js = if plot_data.animations {
+    //     "true"
+    // } else {
+    //     "false"
+    // };
+    // let max_decimals_js = plot_data.max_decimals;
+    // let use_white_js = if plot_data.use_white_theme {
+    //     "true"
+    // } else {
+    //     "false"
+    // };
+    let html_content: Result<String, askama::Error> = HelloTemplate {
+        title: &plot_data.title,
+        autoscale_y: &plot_data.autoscale_y,
+        animations: &plot_data.animations,
+        max_decimals: &plot_data.max_decimals,
+        use_white_theme: &plot_data.use_white_theme,
+        x_axis_type: &x_axis_type,
+        x_axis_label_extra: &x_axis_label_extra,
+        y_min: &y_min_str.parse::<f32>().unwrap(),
+        y_max: &y_max_str.parse::<f32>().unwrap(),
+        series_json: &series_json_objects.join(","),
+    }
+    .render();
 
-// Apply sizes and y-axis autoscale immediately and on zoom
-function applySymbolSizes(startPct, endPct) {{
-            var pct = Math.max(0, Math.min(1, endPct - startPct));
-            var opt = myChart.getOption();
-            var series = opt.series || [];
-            var selected = (opt.legend && opt.legend[0] && opt.legend[0].selected) ? opt.legend[0].selected : null;
-            var xAxis = (opt.xAxis && opt.xAxis[0]) ? opt.xAxis[0] : {{}};
-            var xType = xAxis.type || 'value';
-            var newSeries = series.map(function (s) {{
-                var n = (s.metaN != null) ? s.metaN : ((s.data && s.data.length) ? s.data.length : 1000);
-                var size = computeSize(n, pct);
-                // Toggle large mode based on visible points for better styling accuracy when zoomed-in
-                var visibleN = Math.max(1, Math.round(n * pct));
-                var useLarge = visibleN > 5000;
-                return {{ symbolSize: size, large: useLarge }};
-            }});
-
-            var updates = {{ series: newSeries }};
-
-            if (AUTOSCALE_Y) {{
-                // Y-axis autoscale based on visible window (time/value axis only)
-                var yMin = Number.POSITIVE_INFINITY, yMax = Number.NEGATIVE_INFINITY;
-                if (xType === 'time' || xType === 'value') {{
-                    var allXMin = Number.POSITIVE_INFINITY, allXMax = Number.NEGATIVE_INFINITY;
-                    for (var i = 0; i < series.length; i++) {{
-                        var s = series[i];
-                        if (selected && selected.hasOwnProperty && selected.hasOwnProperty(s.name) && !selected[s.name]) continue;
-                        if (typeof s.metaXMin === 'number') allXMin = Math.min(allXMin, s.metaXMin);
-                        if (typeof s.metaXMax === 'number') allXMax = Math.max(allXMax, s.metaXMax);
-                    }}
-                    if (isFinite(allXMin) && isFinite(allXMax) && allXMax > allXMin) {{
-                        var startVal = allXMin + startPct * (allXMax - allXMin);
-                        var endVal = allXMin + endPct * (allXMax - allXMin);
-                        if (startVal > endVal) {{ var tmp = startVal; startVal = endVal; endVal = tmp; }}
-
-                        // Scan data with stride for performance
-                        for (var i = 0; i < series.length; i++) {{
-                            var s = series[i];
-                            if (selected && selected.hasOwnProperty && selected.hasOwnProperty(s.name) && !selected[s.name]) continue;
-                            var d = s.data || [];
-                            var estimate = (typeof s.metaN === 'number' ? s.metaN : d.length) * Math.max(0, endPct - startPct);
-                            var stride = 1;
-                            if (estimate > 5000 && d.length > 5000) {{
-                                stride = Math.max(1, Math.floor(estimate / 2000));
-                            }}
-                            for (var j = 0; j < d.length; j += stride) {{
-                                var p = d[j];
-                                var x = Array.isArray(p) ? p[0] : null;
-                                var y = Array.isArray(p) ? p[1] : null;
-                                if (typeof x === 'number' && typeof y === 'number') {{
-                                    if (x >= startVal && x <= endVal) {{
-                                        if (isFinite(y)) {{
-                                            if (y < yMin) yMin = y;
-                                            if (y > yMax) yMax = y;
-                                        }}
-                                    }}
-                                }}
-                            }}
-                        }}
-                    }}
-                }}
-
-                var yAxisUpdate = {{}};
-                if (isFinite(yMin) && isFinite(yMax)) {{
-                    var span = Math.abs(yMax - yMin);
-                    var pad = (span === 0) ? 1.0 : (span * 0.10);
-                    yAxisUpdate.min = yMin - pad;
-                    yAxisUpdate.max = yMax + pad;
-                }}
-                updates.yAxis = [yAxisUpdate];
-            }}
-
-            myChart.setOption(updates, false, false);
-        }}
-
-// Initial apply for full view
-        applySymbolSizes(0.0, 1.0);
-
-        // Adapt symbol sizes to the current zoom window
-myChart.on('dataZoom', function () {{
-            var opt = myChart.getOption();
-            var dzArr = opt.dataZoom || [];
-            if (!dzArr.length) {{ return; }}
-            var dz = dzArr[0];
-            var start = (dz.start != null) ? dz.start : 0;
-            var end = (dz.end != null) ? dz.end : 100;
-            var startPct = Math.max(0, Math.min(1, start / 100));
-            var endPct = Math.max(0, Math.min(1, end / 100));
-applySymbolSizes(startPct, endPct);
-        }});
-        // Re-apply autoscale on legend visibility changes
-myChart.on('legendselectchanged', function () {{
-            var opt = myChart.getOption();
-            var dzArr = opt.dataZoom || [];
-            if (!dzArr.length) {{ applySymbolSizes(0.0, 1.0); return; }}
-            var dz = dzArr[0];
-            var start = (dz.start != null) ? dz.start : 0;
-            var end = (dz.end != null) ? dz.end : 100;
-            var startPct = Math.max(0, Math.min(1, start / 100));
-            var endPct = Math.max(0, Math.min(1, end / 100));
-applySymbolSizes(startPct, endPct);
-        }});
-        // Re-apply sizes after toolbox restore resets options
-myChart.on('restore', function () {{
-            setTimeout(function() {{ applySymbolSizes(0.0, 1.0); }}, 0);
-        }});
-    </script>
-</body>
-</html>"#,
-        plot_data.title,
-        autoscale_js,
-        animations_js,
-        max_decimals_js,
-        use_white_js,
-        plot_data.title,
-        x_axis_type,
-        x_axis_label_extra,
-        y_min_str,
-        y_max_str,
-        series_json_objects.join(",")
-    );
-
-    Ok(html_content)
+    html_content
 }
 
 /// Builds the JavaScript object strings for each series.

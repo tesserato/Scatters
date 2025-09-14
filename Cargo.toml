@@ -46,7 +46,7 @@ thiserror = "1.0.59"
 chrono = { version = "0.4", default-features = false, features = ["alloc"] }
 
 # Type-safe HTML generation
-hypertext = "0.2.0"
+askama = "0.14.0"
 
 # JSON serialization for embedding data in HTML/JS
 serde = { version = "1.0.200", features = ["derive"] }
