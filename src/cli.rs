@@ -1,6 +1,14 @@
+//! Defines the command-line interface for the application using `clap`.
+//!
+//! This module contains the `Cli` struct, which is derived from `clap::Parser`.
+//! Each field in the struct corresponds to a command-line argument, option, or flag.
+//! The documentation comments on each field are used by `clap` to generate
+//! the help messages (`--help`).
+
 use clap::Parser;
 use std::path::PathBuf;
 
+/// A tool to generate interactive scatter plots from various data formats.
 #[derive(Parser, Debug)]
 #[command(
     author,
@@ -14,16 +22,16 @@ pub struct Cli {
 
     /// Directory to save the generated HTML plots.
     /// Defaults to saving next to each input file.
-    #[arg(short = 'o', long)]
+    #[arg(short = 'o', long = "output-dir")]
     pub output: Option<PathBuf>,
 
     /// Name of the column to use as the index (X-axis).
-    /// Highest priority for index selection.
+    /// This has the highest priority for index selection.
     #[arg(short = 'i', long)]
     pub index: Option<String>,
 
-    /// Use the first column of the data as the index.
-    /// Overridden by --index.
+    /// Use the first column of the data as the index (X-axis).
+    /// This is overridden by the --index option if both are provided.
     #[arg(short = 'f', long, default_value_t = false)]
     pub use_first_column: bool,
 
@@ -37,23 +45,27 @@ pub struct Cli {
     #[arg(short = 't', long)]
     pub title: Option<String>,
 
-    /// Disable dynamic Y-axis autoscaling (keep initial 10% padded range)
+    /// Disable dynamic Y-axis autoscaling on zoom.
+    /// When disabled, the Y-axis keeps its initial, globally-padded range.
     #[arg(short = 'n', long, default_value_t = false)]
     pub no_autoscale_y: bool,
 
-    /// Enable ECharts animations
+    /// Enable ECharts animations for a more dynamic feel.
+    /// Animations are disabled by default for performance.
     #[arg(short = 'a', long, default_value_t = false)]
     pub animations: bool,
 
-    /// Maximum number of decimal places for numeric formatting (-1 = unlimited)
+    /// Maximum number of decimal places for numeric formatting in tooltips.
+    /// Use -1 for an unlimited number of decimal places.
     #[arg(short = 'm', long = "max-decimals", default_value_t = 2)]
     pub max_decimals: i32,
 
-    /// Print debug info about detected columns and types
+    /// Print debug information during processing.
+    /// This includes detected columns, data types, and DataFrame shape.
     #[arg(short = 'd', long, default_value_t = false)]
     pub debug: bool,
 
-    /// Use white (light) theme instead of dark (dark is default)
+    /// Use a white (light) theme for the plot instead of the default dark theme.
     #[arg(short = 'w', long = "white-theme", default_value_t = false)]
     pub white_theme: bool,
 }

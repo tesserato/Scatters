@@ -5,4 +5,4 @@ cargo check
 write-host ""
 cargo run -- --help
 write-host ""
-cargo run -- "./sample" --debug --output $outputFolder
+cargo run -- "./sample" --debug --output-dir $outputFolder #--no-autoscale-y

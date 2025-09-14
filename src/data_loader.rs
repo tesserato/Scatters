@@ -1,3 +1,10 @@
+//! This module handles loading data from various file formats into Polars DataFrames.
+//!
+//! It supports common tabular formats like CSV, Parquet, JSON Lines, and Excel,
+//! as well as audio formats like WAV, MP3, and FLAC. The module also includes
+//! logic for automatic type inference and casting, such as converting string columns
+//! that appear to be numeric or datetime values into their proper types.
+
 use crate::error::AppError;
 use polars::prelude::*;
 use std::fs::File;
@@ -9,6 +16,20 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 
 /// Loads a supported file into a Polars DataFrame.
+///
+/// This function inspects the file extension to determine the appropriate loader.
+/// After initial loading, it attempts to perform automatic type coercion:
+/// 1.  String columns that look entirely numeric are cast to `Float64`.
+/// 2.  Remaining string columns that resemble datetime formats are cast to `Datetime`.
+///
+/// # Arguments
+///
+/// * `path` - A reference to the path of the file to load.
+///
+/// # Returns
+///
+/// A `Result` containing the loaded `DataFrame` on success, or an `AppError`
+/// if the file format is unsupported, an I/O error occurs, or parsing fails.
 pub fn load_dataframe(path: &Path) -> Result<DataFrame, AppError> {
     let extension = path
         .extension()
@@ -18,10 +39,8 @@ pub fn load_dataframe(path: &Path) -> Result<DataFrame, AppError> {
 
     let mut df = match extension.as_str() {
         "csv" => {
-            // First, try reading assuming a header is present (Polars default)
             let file = File::open(path)?;
-            let df = CsvReader::new(file).finish().map_err(AppError::from)?;
-            df
+            CsvReader::new(file).finish().map_err(AppError::from)?
         }
         "parquet" => ParquetReader::new(File::open(path)?)
             .finish()
@@ -51,11 +70,14 @@ pub fn load_dataframe(path: &Path) -> Result<DataFrame, AppError> {
     Ok(df)
 }
 
-/// Try to cast string columns into Datetime using multiple strategies.
-/// This will only convert the column if a high percentage of non-null values can be parsed.
-/// 1) Polars native cast (RFC-like formats)
-/// 2) Heuristic parser for many common formats: YYYY{sep}MM{sep}DD or DD{sep}MM{sep}YYYY,
-///    optionally followed by time (HH, HH:MM, HH:MM:SS) and date-time separators of 'T' or space.
+/// Attempts to cast string columns to `Datetime` if they match common date/time formats.
+///
+/// This function iterates through string columns and applies two parsing strategies:
+/// 1.  Polars' native `cast`, which handles standard formats like RFC3339.
+/// 2.  A custom heuristic parser (`parse_string_series_to_datetime`) for other common formats.
+///
+/// A column is only converted if at least 90% of its non-null values can be successfully parsed,
+/// preventing accidental conversion of columns with only a few date-like strings.
 fn try_cast_string_columns_to_datetime(df: &mut DataFrame) -> Result<(), AppError> {
     let col_names: Vec<String> = df
         .get_columns()
@@ -72,8 +94,7 @@ fn try_cast_string_columns_to_datetime(df: &mut DataFrame) -> Result<(), AppErro
                 let original_non_nulls = s.len() - s.null_count();
                 let parsed_non_nulls = parsed.len() - parsed.null_count();
 
-                // Only accept the cast if it's successful for at least 90% of non-null values.
-                // This avoids converting columns with only a few date-like strings.
+                // Only accept if the cast is highly successful.
                 if original_non_nulls > 0 && parsed_non_nulls * 10 >= original_non_nulls * 9 {
                     df.replace(&name, parsed).map_err(AppError::from)?;
                     accepted = true;
@@ -90,7 +111,11 @@ fn try_cast_string_columns_to_datetime(df: &mut DataFrame) -> Result<(), AppErro
     Ok(())
 }
 
-/// Attempt to parse a String Series into Datetime (ms) with many formats.
+/// Parses a string `Series` into a `Datetime` `Series` using a variety of format heuristics.
+///
+/// This function builds a list of common date and datetime format strings (e.g., `YYYY-MM-DD`,
+/// `DD/MM/YYYY HH:MM:SS`) and attempts to parse each string value. If successful for a high
+/// percentage of values, it returns a new `Series` of type `Datetime`.
 fn parse_string_series_to_datetime(s: &Series) -> Option<Series> {
     // Generate candidate format strings
     let seps: &[char] = &['-', '/', '.', ' '];
@@ -111,7 +136,8 @@ fn parse_string_series_to_datetime(s: &Series) -> Option<Series> {
             }
         }
     }
-    // Helper: normalize whitespace (collapse runs)
+
+    // Helper to normalize whitespace (trim and collapse runs).
     fn normalize_spaces(input: &str) -> std::borrow::Cow<'_, str> {
         let trimmed = input.trim();
         if trimmed.contains(char::is_whitespace) {
@@ -122,7 +148,7 @@ fn parse_string_series_to_datetime(s: &Series) -> Option<Series> {
         }
     }
 
-    // Try parsing using fmts; collect ms since epoch
+    // Try parsing using all generated formats; collect milliseconds since epoch.
     let mut parsed: Vec<Option<i64>> = Vec::with_capacity(s.len());
     for av in s.iter() {
         let ms_opt = match av {
@@ -139,7 +165,7 @@ fn parse_string_series_to_datetime(s: &Series) -> Option<Series> {
         parsed.push(ms_opt);
     }
 
-    // Apply the 90% threshold here as well.
+    // Apply the 90% threshold for conversion.
     let parsed_non_nulls = parsed.iter().filter(|v| v.is_some()).count();
     let original_non_nulls = s.len() - s.null_count();
 
@@ -155,6 +181,7 @@ fn parse_string_series_to_datetime(s: &Series) -> Option<Series> {
     }
 }
 
+/// Helper function to parse a single string with multiple `chrono` format strings.
 fn try_parse_many(s: &str, fmts: &[String]) -> Option<i64> {
     use chrono::{NaiveDate, NaiveDateTime};
     // Try datetime formats first
@@ -181,7 +208,12 @@ fn try_parse_many(s: &str, fmts: &[String]) -> Option<i64> {
     None
 }
 
-/// Try to cast string columns into Float64 when they look numeric.
+/// Attempts to cast string columns to `Float64` if they appear to be numeric.
+///
+/// A column is converted only if *all* of its non-null string values can be successfully
+/// parsed as a float. This strict rule helps avoid incorrectly converting mixed-type columns.
+/// It also specifically skips columns containing the `|` character, which is reserved
+/// for creating vertical marker lines in the plot.
 fn try_cast_string_columns_to_numeric(df: &mut DataFrame) -> Result<(), AppError> {
     let col_names: Vec<String> = df
         .get_columns()
@@ -192,7 +224,7 @@ fn try_cast_string_columns_to_numeric(df: &mut DataFrame) -> Result<(), AppError
     for name in col_names {
         let s = df.column(&name)?.clone();
         if matches!(s.dtype(), DataType::String) {
-            // Check if the column contains the `|` symbol
+            // Check if the column contains the `|` symbol, used as a special marker.
             let contains_pipe = s.iter().any(|av| match av {
                 AnyValue::String(t) => t.trim() == "|",
                 AnyValue::StringOwned(ref t) => t.trim() == "|",
@@ -200,10 +232,10 @@ fn try_cast_string_columns_to_numeric(df: &mut DataFrame) -> Result<(), AppError
             });
 
             if contains_pipe {
-                continue; // Skip numeric conversion for this column
+                continue; // Skip numeric conversion for this column.
             }
 
-            // Manually trim and parse floats from string values
+            // Manually trim and parse floats from string values.
             let parsed_vals: Vec<Option<f64>> = s
                 .iter()
                 .map(|av| match av {
@@ -225,7 +257,11 @@ fn try_cast_string_columns_to_numeric(df: &mut DataFrame) -> Result<(), AppError
     Ok(())
 }
 
-/// Loads an Excel file (first worksheet) into a DataFrame.
+/// Loads the first worksheet of an Excel file (`.xlsx`, `.xls`) into a DataFrame.
+///
+/// Uses the `calamine` crate to read the Excel data. It auto-detects the header row
+/// by skipping initial empty rows. All data is initially read as strings and then
+/// passed through the same type inference pipeline as other file formats.
 fn load_excel_dataframe(path: &Path) -> Result<DataFrame, AppError> {
     use calamine::{open_workbook_auto, DataType as Xl, Reader};
 
@@ -240,13 +276,12 @@ fn load_excel_dataframe(path: &Path) -> Result<DataFrame, AppError> {
         .worksheet_range(&sheet_name)
         .ok_or_else(|| AppError::UnsupportedFormat(path.to_string_lossy().to_string()))??;
 
-    // Collect rows as Vec<Vec<Xl>>
+    // Collect all rows to find the header index and maximum column count.
     let rows: Vec<Vec<Xl>> = range.rows().map(|r| r.to_vec()).collect();
-    // Find first non-empty row for header
+    // Find first non-empty row to use as the header.
     let mut header_idx: Option<usize> = None;
     for (i, r) in rows.iter().enumerate() {
-        let all_empty = r.iter().all(|c| matches!(c, Xl::Empty));
-        if !all_empty {
+        if !r.iter().all(|c| matches!(c, Xl::Empty)) {
             header_idx = Some(i);
             break;
         }
@@ -254,7 +289,7 @@ fn load_excel_dataframe(path: &Path) -> Result<DataFrame, AppError> {
     let header_idx = header_idx
         .ok_or_else(|| AppError::UnsupportedFormat(path.to_string_lossy().to_string()))?;
 
-    // Determine column count as max row length
+    // Determine column count from the widest row.
     let col_count = rows.iter().map(|r| r.len()).max().unwrap_or(0);
     if col_count == 0 {
         return Err(AppError::UnsupportedFormat(
@@ -262,56 +297,40 @@ fn load_excel_dataframe(path: &Path) -> Result<DataFrame, AppError> {
         ));
     }
 
-    // Build header names from the header row
+    // Build header names from the identified header row.
     let mut headers: Vec<String> = Vec::with_capacity(col_count);
     for i in 0..col_count {
         let name = rows
             .get(header_idx)
             .and_then(|r| r.get(i))
-            .map(|c| match c {
-                Xl::String(s) => s.trim().to_string(),
-                Xl::Float(v) => v.to_string(),
-                Xl::Int(v) => v.to_string(),
-                Xl::Bool(v) => v.to_string(),
-                Xl::DateTime(v) => v.to_string(),
-                _ => String::new(),
-            })
+            .map(|c| c.to_string())
             .unwrap_or_default();
-        let final_name = if name.is_empty() {
+        let final_name = if name.trim().is_empty() {
             format!("col_{}", i + 1)
         } else {
-            name
+            name.trim().to_string()
         };
         headers.push(final_name);
     }
 
-    // Initialize column vectors
+    // Initialize column vectors to store data as strings.
     let mut columns: Vec<Vec<Option<String>>> = vec![Vec::new(); col_count];
 
+    // Populate columns with data rows (all converted to strings).
     for (ri, row) in rows.iter().enumerate() {
         if ri <= header_idx {
-            continue;
-        } // skip header and any leading rows before it
+            continue; // Skip header and any rows above it.
+        }
         for ci in 0..col_count {
-            let val_str_opt: Option<String> = row
-                .get(ci)
-                .map(|c| match c {
-                    Xl::Empty => None,
-                    Xl::String(s) => Some(s.trim().to_string()),
-                    Xl::Float(v) => Some(v.to_string()),
-                    Xl::Int(v) => Some(v.to_string()),
-                    Xl::Bool(v) => Some(v.to_string()),
-                    Xl::DateTime(v) => Some(v.to_string()),
-                    Xl::Duration(v) => Some(v.to_string()),
-                    Xl::DateTimeIso(s) => Some(s.trim().to_string()),
-                    Xl::DurationIso(s) => Some(s.trim().to_string()),
-                    Xl::Error(_) => None,
-                })
-                .flatten();
+            let val_str_opt: Option<String> = row.get(ci).and_then(|c| match c {
+                Xl::Empty | Xl::Error(_) => None,
+                _ => Some(c.to_string()),
+            });
             columns[ci].push(val_str_opt);
         }
     }
 
+    // Create a Polars Series for each column and assemble the DataFrame.
     let mut series_vec: Vec<Series> = Vec::with_capacity(col_count);
     for (i, name) in headers.iter().enumerate() {
         let s = Series::new(name.as_str(), &columns[i]);
@@ -321,7 +340,15 @@ fn load_excel_dataframe(path: &Path) -> Result<DataFrame, AppError> {
     Ok(df)
 }
 
-/// Loads an audio file and converts its first track to a DataFrame.
+/// Loads an audio file and decodes its first track into a DataFrame.
+///
+/// Uses the `symphonia` crate to handle various audio codecs and formats.
+/// The resulting DataFrame contains two columns:
+/// - `sample_index`: A `u32` column representing the index of each audio sample.
+/// - `amplitude`: A `f32` column with the sample's amplitude.
+///
+/// For multi-channel audio, samples from all channels are interleaved into the single
+/// `amplitude` column.
 fn load_audio_dataframe(path: &Path) -> Result<DataFrame, AppError> {
     let src = File::open(path)?;
     let mss = MediaSourceStream::new(Box::new(src), Default::default());
@@ -343,6 +370,7 @@ fn load_audio_dataframe(path: &Path) -> Result<DataFrame, AppError> {
 
     let mut samples_f32: Vec<f32> = Vec::new();
 
+    // Decoding loop
     loop {
         let packet = match format.next_packet() {
             Ok(packet) => packet,
@@ -360,6 +388,7 @@ fn load_audio_dataframe(path: &Path) -> Result<DataFrame, AppError> {
         samples_f32.extend_from_slice(sample_buf.samples());
     }
 
+    // Create DataFrame from decoded samples.
     let indices: Vec<u32> = (0..samples_f32.len() as u32).collect();
     let df = df! {
         "sample_index" => &indices,
