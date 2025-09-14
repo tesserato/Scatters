@@ -156,11 +156,11 @@
                             var s = series[i];
                             if (selected && selected.hasOwnProperty && selected.hasOwnProperty(s.name) && !selected[s.name]) continue;
                             var d = s.data || [];
-                            var estimate = (typeof s.metaN === 'number' ? s.metaN : d.length) * Math.max(0, endPct - startPct);
                             var stride = 1;
-                            if (estimate > 5000 && d.length > 5000) {
-                                stride = Math.max(1, Math.floor(estimate / 2000));
-                            }
+                            // var estimate = (typeof s.metaN === 'number' ? s.metaN : d.length) * Math.max(0, endPct - startPct);
+                            // if (estimate > 5000 && d.length > 5000) {
+                            //     stride = Math.max(1, Math.floor(estimate / 2000));
+                            // }
                             for (var j = 0; j < d.length; j += stride) {
                                 var p = d[j];
                                 var x = Array.isArray(p) ? p[0] : null;
