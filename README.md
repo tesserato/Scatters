@@ -1,123 +1,136 @@
-# data_plotter
+# Scatters
 
-A Rust CLI that turns tabular data and audio files into interactive, self-contained HTML scatter plots powered by ECharts.
+[![crates.io](https://img.shields.io/crates/v/scatters.svg)](https://crates.io/crates/scatters)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-- Inputs: CSV, Parquet, JSON/JSONL/NDJSON, and audio (WAV/MP3/FLAC)
-- Output: One HTML file per input, with zoom/pan, legend, and toolbox — no server required
-- Directory mode: Pass a folder to process all supported files recursively
+A CLI to instantly turn tabular data and audio files into interactive, self-contained HTML scatter plots.
 
-## Build and Run
+`scatters` reads CSV, JSON, Parquet, Excel, and common audio files, then generates beautiful, interactive charts powered by ECharts. It works recursively on directories and saves each plot as a single `.html` file that requires no internet connection or server to view.
 
-Prerequisites: Rust toolchain with Cargo
 
-- Build (debug):
-```powershell
-cargo build
+
+## Features
+
+-   **Broad Format Support**: Process CSV, Parquet, JSON/JSONL, Excel (XLSX/XLS), and audio (WAV, MP3, FLAC).
+-   **Interactive Plots**: Output includes zoom/pan controls, a draggable legend, a toolbox to save the chart as an image, and tooltips for data points.
+-   **Fully Self-Contained**: Generates single HTML files with all necessary JS/CSS included from a CDN. No local dependencies or servers needed to view the plots.
+-   **Intelligent Defaults**: Automatically detects the best column for the X-axis (prioritizing datetimes) and plots all other numeric columns.
+-   **Powerful Customization**: Use CLI flags to specify X/Y columns, set a title, choose a light or dark theme, enable animations, and more.
+-   **Directory Processing**: Point it at a folder to recursively find and process all supported files.
+-   **Special Markers**: Use a `|` value in a string column to draw vertical marker lines on your plot for highlighting events.
+
+## Installation
+
+Ensure you have the Rust toolchain installed. You can then install `scatters` using Cargo:
+```shell
+cargo install scatters
 ```
-- Build (release):
-```powershell
-cargo build --release
-```
-- Show CLI help:
-```powershell
-cargo run -- --help
-```
-
 ## Usage
 
-Basic examples:
-```powershell
-# Plot all numeric columns; auto-detect X when possible
-cargo run -- sample/sample.csv
+Once installed, you can use the `scatters` command. If you are running from a cloned repository, you can use cargo run --.
 
-# Write outputs to a directory
-cargo run -- sample/sample.csv -o plots/
+### Basic Examples
 
-# Set the X-axis explicitly
-cargo run -- data.csv --index timestamp
+#### Plot a CSV file, auto-detecting X/Y axes
+`scatters data/measurements.csv`
 
-# Choose specific Y columns
-cargo run -- data.csv -c sensor_a,sensor_b
+#### Process an entire directory and save plots to a specific folder
+`scatters ./my_data_folder -o ./plots`
 
-# Use first column as X and set a custom title
-cargo run -- data.csv --use-first-column --title "My Custom Plot"
+#### Plot a WAV file, using sample index as X and amplitude as Y
+`scatters audio/sound.wav`
 
-# Process an entire directory recursively
-cargo run -- path/to/folder -o plots/
+#### Specify the 'timestamp' column as the X-axis
+`scatters sensor_log.parquet --index timestamp`
 
-# Audio files (mono or multi-channel)
-cargo run -- audio.wav
+#### Plot only specific columns ('sensor_a', 'sensor_b')
+`scatters sensor_log.parquet -c sensor_a,sensor_b`
 
-# Disable dynamic Y autoscaling (keep initial padded range)
-cargo run -- sample/sample.csv --no-autoscale-y
+#### Use the first column as X, add a title, and use the light theme
+`scatters data.csv --use-first-column --title "My Custom Plot" --white-theme`
 
-```
+#### Disable dynamic Y-axis autoscaling and enable animations
+`scatters data.csv --no-autoscale-y --animations`
 
-Where outputs go:
-- With `-o/--output-dir`, files are saved under that directory as `<stem>.html`.
-- Without it, each plot is saved next to its input file.
+## Output Location
 
-## CLI
-```
-A tool to generate interactive scatter plots from various data formats.
+By default, each plot is saved as <input_filename>.html next to the original file.
 
-Usage: data_plotter.exe [OPTIONS] <INPUT_PATH>
+Use the -o or --output-dir option to save all generated plots into a specific directory.
+
+## CLI Reference
+
+A CLI to instantly turn tabular data and audio files into interactive HTML scatter plots.
+
+Usage: scatters [OPTIONS] <INPUT_PATH>
 
 Arguments:
   <INPUT_PATH>  The input file or folder to scan for data
 
 Options:
-  -o, --output-dir <OUTPUT_DIR>  Directory to save the generated HTML plots. Defaults to saving next to each input file
-      --index <INDEX>            Name of the column to use as the index (X-axis). Highest priority for index selection
-      --use-first-column         Use the first column of the data as the index. Overridden by --index
-  -c, --columns <COLUMNS>        Comma-separated list of columns to plot (Y-axis). If not provided, all numeric columns will be plotted
-      --title <TITLE>            A custom title for the plot. Defaults to the input filename
-      --no-autoscale-y           Disable dynamic Y-axis autoscaling on zoom (keeps initial Y range)
-  -h, --help                     Print help
-  -V, --version                  Print version
-```
+  -o, --output-dir <OUTPUT_DIR>
+          Directory to save the generated HTML plots. Defaults to saving next to each input file
+  -i, --index <INDEX>
+          Name of the column to use as the index (X-axis). This has the highest priority for index selection
+  -f, --use-first-column
+          Use the first column of the data as the index (X-axis). This is overridden by the --index option if both are provided
+  -c, --columns <COLUMNS>
+          Comma-separated list of columns to plot (Y-axis). If not provided, all numeric columns will be plotted
+  -t, --title <TITLE>
+          A custom title for the plot. Defaults to the input filename
+  -n, --no-autoscale-y
+          Disable dynamic Y-axis autoscaling on zoom. When disabled, the Y-axis keeps its initial, globally-padded range
+  -a, --animations
+          Enable ECharts animations for a more dynamic feel. Animations are disabled by default for performance
+  -m, --max-decimals <MAX_DECIMALS>
+          Maximum number of decimal places for numeric formatting in tooltips. Use -1 for an unlimited number of decimal places [default: 2]
+  -l, --large-mode-threshold <LARGE_MODE_THRESHOLD>
+          Threshold for ECharts `large` mode. Series with more points than this will be optimized for performance, which may reduce detail [default: 2000]
+  -d, --debug
+          Print debug information during processing. This includes detected columns, data types, and DataFrame shape
+  -w, --white-theme
+          Use a white (light) theme for the plot instead of the default dark theme
+  -h, --help
+          Print help
+  -V, --version
+          Print version
 
-## How X and Y are chosen
+## X-Axis Selection Priority
 
-X-axis selection priority:
-1) `--index <name>`
-2) `--use-first-column`
-3) If a column named `sample_index` exists (audio), use it
-4) First datetime column (string columns may be auto-cast to datetime)
-5) Fallback to a generated `row_index`
+scatters selects the X-axis column in the following order:
 
-Y-axis selection:
-- If `-c/--columns` is provided, those columns are used
-- Otherwise, all numeric columns except the chosen X column
+Column name provided via --index <name>.
 
-## Supported formats and behavior
+The first column if --use-first-column is passed.
 
-- CSV, Parquet
-- JSON, JSONL/NDJSON (JSON is read as JSON Lines; for array-of-objects JSON, convert to NDJSON)
-- Audio: WAV/MP3/FLAC via Symphonia
-  - The first default track is decoded
-  - DataFrame has `sample_index` (X) and `amplitude` (Y)
-  - For multi-channel audio, samples are currently interleaved into the single `amplitude` series
+A column named sample_index (default for audio files).
 
-Notes on parsing and type inference:
-- String columns that look like datetimes are only cast to datetime if at least one value parses successfully. This avoids selecting an "all-null" datetime axis and producing empty plots.
-- String columns that look numeric are trimmed and parsed into Float64 if at least ~50% of their values parse successfully. This helps for CSVs that don't have headers and/or have numeric values with whitespace.
+The first column with a Datetime or Date data type.
 
-## Output HTML
+If none of the above match, it falls back to a generated row_index.
 
-- Self-contained HTML with ECharts loaded from CDN
-- Interactive features: zoom/pan (dataZoom), legend scroll, save-as-image, restore
-- X-axis type is set automatically (time, category, or value) based on the chosen X series
-- Themes: dark (default) and white (enable with `--white-theme`)
-- Numeric formatting: `-m/--max-decimals` controls decimals; `-1` disables the limit; scientific notation when appropriate
+## Y-Axis Selection
 
-## Project structure (brief)
+If -c/--columns is used, only the specified columns are plotted.
 
-- `src/cli.rs` — command-line interface (clap)
-- `src/lib.rs` — orchestration (discover files, process each, write output)
-- `src/data_loader.rs` — load DataFrames; audio decoding; best-effort datetime casting
-- `src/processing.rs` — select X/Y series and plot title
-- `src/plotter.rs` — generate HTML and embed series as JSON for ECharts
-- `src/error.rs` — error types
+Otherwise, all columns with a numeric data type (excluding the chosen X-axis column) are automatically plotted.
 
-For additional repository-specific guidance, see `WARP.md`.
+## Type Inference
+
+scatters performs automatic type casting to improve plotting:
+
+String to Numeric: Columns where all non-null string values can be parsed as numbers are converted to Float64.
+
+String to Datetime: String columns are converted to Datetime if at least 90% of non-null values match a common date/time format (e.g., YYYY-MM-DD HH:MM:SS, DD/MM/YYYY, etc.).
+
+## Special Markers for Vertical Lines
+
+To highlight specific events or regions, you can add vertical lines to the plot. Create a string column where most values are empty or null, and place a pipe character (|) at the rows where you want a line. scatters will automatically render these as vertical markLines aligned with the corresponding X-axis value.
+
+## Audio File Handling
+
+Audio files (WAV, MP3, FLAC) are decoded into a time series.
+
+The resulting data has two columns: sample_index (the X-axis) and amplitude (the Y-axis).
+
+Multi-channel audio is currently interleaved into a single amplitude series.
