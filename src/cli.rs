@@ -60,6 +60,10 @@ pub struct Cli {
     #[arg(short = 'm', long = "max-decimals", default_value_t = 2)]
     pub max_decimals: i32,
 
+    /// Threshold for ECharts `large` mode. Series with more points than this will be optimized for performance, which may reduce detail.
+    #[arg(short = 'l', long = "large-mode-threshold", default_value_t = 2000)]
+    pub large_mode_threshold: usize,
+
     /// Print debug information during processing.
     /// This includes detected columns, data types, and DataFrame shape.
     #[arg(short = 'd', long, default_value_t = false)]

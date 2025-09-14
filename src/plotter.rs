@@ -58,25 +58,21 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, askama::Error>
         ""
     };
 
-    // Compute initial Y-axis limits with padding.
+    // Compute initial Y-axis limits with padding by iterating through all points.
     let (y_min, y_max) = {
         let mut min_v = f64::INFINITY;
         let mut max_v = f64::NEG_INFINITY;
         for ys in &plot_data.y_series_list {
-            if let Ok(casted) = ys.cast(&DataType::Float64) {
-                let ca = casted.f64().unwrap();
-                if let Some(mn) = ca.min() {
-                    if mn.is_finite() {
-                        min_v = min_v.min(mn);
-                    }
-                }
-                if let Some(mx) = ca.max() {
-                    if mx.is_finite() {
-                        max_v = max_v.max(mx);
+            for val in ys.iter() {
+                if let Some(y_float) = any_value_to_f64(&val) {
+                    if y_float.is_finite() {
+                        min_v = min_v.min(y_float);
+                        max_v = max_v.max(y_float);
                     }
                 }
             }
         }
+
         if min_v.is_finite() && max_v.is_finite() {
             let span = (max_v - min_v).abs();
             let pad = if span == 0.0 { 1.0 } else { span * 0.10 };
@@ -142,14 +138,14 @@ fn build_series_json(plot_data: &PlotData) -> Result<Vec<String>, AppError> {
                     let y_json = any_value_to_json_value(y_val.clone());
                     data_points.push([x_json, y_json]);
 
-                    // Numeric values for meta range calculations (only numeric/time).
-                    if let (Some(xn), Some(yn)) =
-                        (any_value_to_f64(&x_val), any_value_to_f64(&y_val))
-                    {
+                    // Decouple range calculations to correctly handle categorical X-axis.
+                    if let Some(xn) = any_value_to_f64(&x_val) {
                         if xn.is_finite() {
                             x_min = x_min.min(xn);
                             x_max = x_max.max(xn);
                         }
+                    }
+                    if let Some(yn) = any_value_to_f64(&y_val) {
                         if yn.is_finite() {
                             y_min = y_min.min(yn);
                             y_max = y_max.max(yn);
@@ -160,6 +156,18 @@ fn build_series_json(plot_data: &PlotData) -> Result<Vec<String>, AppError> {
         }
 
         let n_points = data_points.len();
+
+        // Dynamically adjust symbol size based on the number of points for better readability.
+        let symbol_size = if n_points <= 1_000 {
+            8
+        } else if n_points <= 10_000 {
+            5
+        } else if n_points <= 100_000 {
+            3
+        } else {
+            2
+        };
+
         // Use serde_json to serialize metadata for JS.
         let x_min_val = if x_min.is_finite() {
             Value::from(x_min)
@@ -182,8 +190,8 @@ fn build_series_json(plot_data: &PlotData) -> Result<Vec<String>, AppError> {
             Value::Null
         };
 
-        // Construct the final JSON object for the series.
-        let series_obj = serde_json::json!({
+        // Construct the base JSON object for the series.
+        let mut series_obj = serde_json::json!({
             "name": y_series.name(),
             "type": "scatter",
             "metaN": n_points,
@@ -191,12 +199,21 @@ fn build_series_json(plot_data: &PlotData) -> Result<Vec<String>, AppError> {
             "metaXMax": x_max_val,
             "metaYMin": y_min_val,
             "metaYMax": y_max_val,
-            "symbolSize": 10,
-            "large": true,
-            "largeThreshold": 2000,
+            "symbolSize": symbol_size,
             "data": data_points,
             "markLine": { "data": mark_lines_data, "symbol": "none" }
         });
+
+        // Conditionally enable `large` mode for performance on large datasets.
+        if n_points > plot_data.large_mode_threshold {
+            if let Some(obj) = series_obj.as_object_mut() {
+                obj.insert("large".to_string(), Value::Bool(true));
+                obj.insert(
+                    "largeThreshold".to_string(),
+                    (plot_data.large_mode_threshold as u64).into(),
+                );
+            }
+        }
 
         let series_obj_str = serde_json::to_string(&series_obj)?;
         series_objects.push(series_obj_str);
@@ -246,9 +263,12 @@ fn any_value_to_json_value(av: AnyValue) -> Value {
 ///
 /// This helper is used for calculating min/max ranges for axes. It returns `Some(f64)`
 /// for numeric, date, and datetime types, and `None` for all others. Dates and datetimes
-/// are converted to milliseconds since the epoch as a float.
+/// are converted to milliseconds since the epoch as a float. It will also attempt to
+/// parse string values into floats, ignoring common formatting like thousand separators.
 fn any_value_to_f64(av: &AnyValue) -> Option<f64> {
     match av {
+        AnyValue::String(s) => s.trim().replace(',', "").parse::<f64>().ok(),
+        AnyValue::StringOwned(s) => s.trim().replace(',', "").parse::<f64>().ok(),
         AnyValue::UInt8(v) => Some(*v as f64),
         AnyValue::UInt16(v) => Some(*v as f64),
         AnyValue::UInt32(v) => Some(*v as f64),

@@ -28,6 +28,8 @@ pub struct PlotData {
     pub max_decimals: i32,
     /// Whether to use the white (light) theme.
     pub use_white_theme: bool,
+    /// The threshold for enabling ECharts' high-performance `large` mode.
+    pub large_mode_threshold: usize,
 }
 
 /// Selects the X and Y series from a DataFrame and packages them for plotting.
@@ -69,6 +71,7 @@ pub fn prepare_plot_data(df: DataFrame, cli: &Cli, file_path: &Path) -> Result<P
         animations: cli.animations,
         max_decimals: cli.max_decimals,
         use_white_theme: cli.white_theme,
+        large_mode_threshold: cli.large_mode_threshold,
     })
 }
 
