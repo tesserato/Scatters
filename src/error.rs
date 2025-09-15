@@ -21,24 +21,28 @@ pub enum AppError {
     UnsupportedFormat(String),
 
     /// An I/O error occurred, typically while reading a file or writing the output plot.
-    #[error("I/O error")]
+    #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
     /// An error originating from the Polars data manipulation library.
-    #[error("Data processing error (Polars)")]
+    #[error("Data processing error (Polars): {0}")]
     Polars(#[from] polars::prelude::PolarsError),
 
     /// An error from the Symphonia library, occurring during audio file decoding.
-    #[error("Audio decoding error (Symphonia)")]
+    #[error("Audio decoding error (Symphonia): {0}")]
     Symphonia(#[from] symphonia::core::errors::Error),
 
     /// An error that occurred during JSON serialization of the plot data.
-    #[error("Failed to serialize data to JSON")]
+    #[error("Failed to serialize data to JSON: {0}")]
     JsonSerialization(#[from] serde_json::Error),
 
     /// An error from the Calamine library, occurring during Excel file parsing.
-    #[error("Excel parsing error (Calamine)")]
+    #[error("Excel parsing error (Calamine): {0}")]
     Calamine(#[from] calamine::Error),
+
+    /// An error from the Askama template engine during HTML rendering.
+    #[error("HTML template rendering error: {0}")]
+    Template(#[from] askama::Error),
 
     /// Error for when a user-specified column name is not found in the DataFrame.
     #[error("Column '{0}' not found in the data")]

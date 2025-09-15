@@ -38,10 +38,10 @@ struct PageTemplate<'a> {
 ///
 /// # Returns
 ///
-/// A `Result` containing the rendered HTML content as a `String`, or an `askama::Error` if templating fails.
-pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, askama::Error> {
+/// A `Result` containing the rendered HTML content as a `String`, or an `AppError` if templating fails.
+pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
     // Convert Polars Series into a format suitable for ECharts JSON.
-    let series_json_objects = build_series_json(plot_data).unwrap_or_default();
+    let series_json_objects = build_series_json(plot_data)?;
     let series_json_str = series_json_objects.join(",");
 
     // Determine ECharts x-axis type based on the data type of the X series.
@@ -96,7 +96,7 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, askama::Error>
         series_json: &series_json_str,
     };
 
-    template.render()
+    Ok(template.render()?)
 }
 
 /// Builds the JavaScript object strings for each data series to be plotted.

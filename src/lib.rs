@@ -12,7 +12,6 @@
 //! - `plotter`: Generates the final HTML/JavaScript plot from the prepared data.
 //! - `error`: Defines the application's custom error type.
 
-use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
 use walkdir::WalkDir;
@@ -40,7 +39,7 @@ use crate::error::AppError;
 /// # Errors
 ///
 /// Returns an error if file discovery or processing fails for any of the files.
-pub fn run(cli: &Cli) -> Result<()> {
+pub fn run(cli: &Cli) -> Result<(), AppError> {
     // 1. Discover files to process
     let files_to_process = find_supported_files(&cli.input_path)?;
     if files_to_process.is_empty() {
@@ -53,8 +52,9 @@ pub fn run(cli: &Cli) -> Result<()> {
     // 2. Process each file
     for file_path in files_to_process {
         println!("Processing '{}'...", file_path.display());
-        process_single_file(&file_path, cli)
-            .with_context(|| format!("Failed to process file: {}", file_path.display()))?;
+        if let Err(e) = process_single_file(&file_path, cli) {
+            eprintln!("  -> Error processing file {}: {}", file_path.display(), e);
+        }
     }
 
     println!("Done.");
@@ -71,7 +71,7 @@ pub fn run(cli: &Cli) -> Result<()> {
 /// # Errors
 ///
 /// Returns an error if any step (loading, processing, plotting, or saving) fails.
-fn process_single_file(file_path: &Path, cli: &Cli) -> Result<()> {
+fn process_single_file(file_path: &Path, cli: &Cli) -> Result<(), AppError> {
     // 1. Load data into a DataFrame
     let df = data_loader::load_dataframe(file_path)?;
 
@@ -92,8 +92,7 @@ fn process_single_file(file_path: &Path, cli: &Cli) -> Result<()> {
     // 4. Save the output
     let output_path = generate_output_path(file_path, cli);
     fs::create_dir_all(output_path.parent().unwrap_or(Path::new(".")))?;
-    fs::write(&output_path, html_content)
-        .with_context(|| format!("Failed to write output to {}", output_path.display()))?;
+    fs::write(&output_path, html_content)?;
 
     println!("  -> Plot saved to '{}'", output_path.display());
 
@@ -117,7 +116,8 @@ fn process_single_file(file_path: &Path, cli: &Cli) -> Result<()> {
 fn find_supported_files(path: &Path) -> Result<Vec<std::path::PathBuf>, AppError> {
     let mut files = Vec::new();
     let supported_extensions: Vec<&str> = vec![
-        "csv", "parquet", "json", "jsonl", "ndjson", "xlsx", "xls", "wav", "mp3", "flac",
+        "csv", "parquet", "json", "jsonl", "ndjson", "xlsx", "xls", "wav", "mp3", "flac", "ogg",
+        "m4a", "aac",
     ];
 
     if path.is_file() {

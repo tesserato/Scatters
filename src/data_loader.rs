@@ -53,7 +53,7 @@ pub fn load_dataframe(path: &Path) -> Result<DataFrame, AppError> {
                 .map_err(AppError::from)?
         }
         "xlsx" | "xls" => load_excel_dataframe(path)?,
-        "wav" | "mp3" | "flac" => return load_audio_dataframe(path),
+        "wav" | "mp3" | "flac" | "ogg" | "m4a" | "aac" => return load_audio_dataframe(path),
         _ => {
             return Err(AppError::UnsupportedFormat(
                 path.to_string_lossy().to_string(),
@@ -340,16 +340,22 @@ fn load_excel_dataframe(path: &Path) -> Result<DataFrame, AppError> {
     Ok(df)
 }
 
-/// Loads an audio file and decodes its first track into a DataFrame.
+/// Loads an audio file and decodes its default track into a DataFrame.
 ///
 /// Uses the `symphonia` crate to handle various audio codecs and formats.
-/// The resulting DataFrame contains two columns:
-/// - `sample_index`: A `u32` column representing the index of each audio sample.
-/// - `amplitude`: A `f32` column with the sample's amplitude.
+/// The resulting DataFrame will contain a `sample_index` column and one column for
+/// each audio channel (e.g., `channel_0`, `channel_1`).
 ///
-/// For multi-channel audio, samples from all channels are interleaved into the single
-/// `amplitude` column.
+/// # Arguments
+///
+/// * `path` - A reference to the path of the file to load.
+///
+/// # Returns
+///
+/// A `Result` containing a `DataFrame` with separate columns for each audio
+/// channel on success, or an `AppError` on failure.
 fn load_audio_dataframe(path: &Path) -> Result<DataFrame, AppError> {
+    // Setup: Open file and initialize symphonia probe.
     let src = File::open(path)?;
     let mss = MediaSourceStream::new(Box::new(src), Default::default());
 
@@ -365,10 +371,22 @@ fn load_audio_dataframe(path: &Path) -> Result<DataFrame, AppError> {
         ))
     })?;
 
+    // Get the number of channels from the track's codec parameters.
+    let num_channels = track
+        .codec_params
+        .channels
+        .ok_or_else(|| {
+            AppError::Symphonia(symphonia::core::errors::Error::Unsupported(
+                "Channel count is not available for the track.".into(),
+            ))
+        })?
+        .count();
+
     let dec_opts: DecoderOptions = Default::default();
     let mut decoder = symphonia::default::get_codecs().make(&track.codec_params, &dec_opts)?;
 
-    let mut samples_f32: Vec<f32> = Vec::new();
+    // Create a vector of vectors, one for each channel.
+    let mut channels_data: Vec<Vec<f32>> = vec![Vec::new(); num_channels];
 
     // Decoding loop
     loop {
@@ -382,17 +400,42 @@ fn load_audio_dataframe(path: &Path) -> Result<DataFrame, AppError> {
             Err(err) => return Err(AppError::from(err)),
         };
 
+        // Decode the packet into an audio buffer.
         let decoded = decoder.decode(&packet)?;
+
         let mut sample_buf = SampleBuffer::<f32>::new(decoded.capacity() as u64, *decoded.spec());
-        sample_buf.copy_interleaved_ref(decoded);
-        samples_f32.extend_from_slice(sample_buf.samples());
+        sample_buf.copy_planar_ref(decoded);
+
+        // Iterate through each channel (plane) in the decoded buffer.
+        for (channel_idx, plane) in sample_buf.planes().planes().iter().enumerate() {
+            // Append the samples from the current plane to the correct channel vector.
+            channels_data[channel_idx].extend_from_slice(plane);
+        }
     }
 
-    // Create DataFrame from decoded samples.
-    let indices: Vec<u32> = (0..samples_f32.len() as u32).collect();
-    let df = df! {
-        "sample_index" => &indices,
-        "amplitude" => &samples_f32,
-    }?;
+    // --- Create DataFrame from the separated channel data ---
+
+    // Determine the number of samples from the first channel.
+    let num_samples = channels_data.get(0).map_or(0, |v| v.len());
+    if num_samples == 0 {
+        return Ok(DataFrame::default()); // Return an empty DataFrame if no samples.
+    }
+
+    // Create the 'sample_index' series.
+    let indices: Vec<u32> = (0..num_samples as u32).collect();
+    let mut series_vec = vec![Series::new("sample_index", &indices)];
+
+    // Create a Series for each channel's data.
+    for (i, channel_samples) in channels_data.iter().enumerate() {
+        // Ensure all channels have the same length. Pad with zeros if necessary.
+        let mut samples = channel_samples.clone();
+        samples.resize(num_samples, 0.0);
+
+        let name = format!("channel_{}", i + 1);
+        series_vec.push(Series::new(&name, samples));
+    }
+
+    // Assemble the final DataFrame.
+    let df = DataFrame::new(series_vec)?;
     Ok(df)
 }

@@ -17,7 +17,7 @@ categories = ["command-line-utilities", "visualization"]
 
 [dependencies]
 # Core data processing
-polars = { version = "0.40.0", features = [
+polars = { version = "0.50.0", features = [
     "lazy",
     "csv",
     "parquet",
@@ -27,20 +27,20 @@ polars = { version = "0.40.0", features = [
 ] }
 
 # Excel file processing
-calamine = "0.22"
+calamine = "0.30"
 
 # Audio file processing
 symphonia = { version = "0.5.4", features = ["all-formats", "all-codecs"] }
 
 # CLI argument parsing
-clap = { version = "4.5.4", features = ["derive"] }
+clap = { version = "4.5.47", features = ["derive"] }
 
 # Filesystem traversal
 walkdir = "2.5.0"
 
 # Error handling
-anyhow = "1.0.82"
-thiserror = "1.0.59"
+anyhow = "1.0.99"
+thiserror = "2.0.16"
 
 # Datetime parsing
 chrono = { version = "0.4", default-features = false, features = ["alloc"] }
@@ -49,5 +49,5 @@ chrono = { version = "0.4", default-features = false, features = ["alloc"] }
 askama = "0.14.0"
 
 # JSON serialization for embedding data in HTML/JS
-serde = { version = "1.0.200", features = ["derive"] }
-serde_json = "1.0.116"
+serde = { version = "1.0.224", features = ["derive"] }
+serde_json = "1.0.145"

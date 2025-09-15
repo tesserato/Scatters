@@ -5,7 +5,6 @@
 //! 2. Calling the main application logic in the `scatters` library.
 //! 3. Handling and printing any errors that occur during execution.
 
-use anyhow::Result;
 use clap::Parser;
 use scatters::cli::Cli;
 
@@ -13,7 +12,7 @@ use scatters::cli::Cli;
 ///
 /// Parses command-line arguments and invokes the library's `run` function.
 /// If an error occurs, it is printed to stderr and the process exits with a non-zero status code.
-fn main() -> Result<()> {
+fn main() {
     // Parse command-line arguments
     let cli = Cli::parse();
 
@@ -22,6 +21,4 @@ fn main() -> Result<()> {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
-
-    Ok(())
 }
