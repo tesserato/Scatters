@@ -45,6 +45,10 @@ pub struct Cli {
     #[arg(short = 't', long)]
     pub title: Option<String>,
 
+    /// The character (or string) to recognize as a vertical marker in string columns.
+    #[arg(short = 'M', long = "special-marker", default_value_t = String::from("|"))]
+    pub special_marker: String,
+
     /// Disable dynamic Y-axis autoscaling on zoom.
     /// When disabled, the Y-axis keeps its initial, globally-padded range.
     #[arg(short = 'n', long, default_value_t = false)]

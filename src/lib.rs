@@ -73,7 +73,7 @@ pub fn run(cli: &Cli) -> Result<(), AppError> {
 /// Returns an error if any step (loading, processing, plotting, or saving) fails.
 fn process_single_file(file_path: &Path, cli: &Cli) -> Result<(), AppError> {
     // 1. Load data into a DataFrame
-    let df = data_loader::load_dataframe(file_path)?;
+    let df = data_loader::load_dataframe(file_path, cli)?;
 
     if cli.debug {
         println!("  -> Detected columns:");

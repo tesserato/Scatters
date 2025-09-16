@@ -5,6 +5,7 @@
 //! logic for automatic type inference and casting, such as converting string columns
 //! that appear to be numeric or datetime values into their proper types.
 
+use crate::cli::Cli;
 use crate::error::AppError;
 use calamine::{open_workbook_auto, Data, DataType as Xl, Reader};
 use polars::prelude::*;
@@ -32,7 +33,7 @@ use symphonia::core::meta::MetadataOptions;
 ///
 /// A `Result` containing the loaded `DataFrame` on success, or an `AppError`
 /// if the file format is unsupported, an I/O error occurs, or parsing fails.
-pub fn load_dataframe(path: &Path) -> Result<DataFrame, AppError> {
+pub fn load_dataframe(path: &Path, cli: &Cli) -> Result<DataFrame, AppError> {
     let extension = path
         .extension()
         .and_then(|s| s.to_str())
@@ -72,7 +73,7 @@ pub fn load_dataframe(path: &Path) -> Result<DataFrame, AppError> {
                     let value = fields
                         .get(i)
                         .map(|field| {
-                            if field.is_empty() || field == "|" {
+                            if field.is_empty() {
                                 None
                             } else {
                                 Some(field.clone())
@@ -114,7 +115,7 @@ pub fn load_dataframe(path: &Path) -> Result<DataFrame, AppError> {
 
     // First, try to coerce string columns that look numeric into Float64.
     // This prevents purely numeric IDs from being misinterpreted as dates.
-    try_cast_string_columns_to_numeric(&mut df)?;
+    try_cast_string_columns_to_numeric(&mut df, cli)?;
     // Next, attempt to auto-coerce remaining string columns that look like datetimes.
     try_cast_string_columns_to_datetime(&mut df)?;
     // After all in-place modifications, rechunk the DataFrame to ensure
@@ -266,9 +267,9 @@ fn try_parse_many(s: &str, fmts: &[String]) -> Option<i64> {
 ///
 /// A column is converted only if *all* of its non-null string values can be successfully
 /// parsed as a float. This strict rule helps avoid incorrectly converting mixed-type columns.
-/// It also specifically skips columns containing the `|` character, which is reserved
+/// It also specifically skips columns containing the special marker character, which is reserved
 /// for creating vertical marker lines in the plot.
-fn try_cast_string_columns_to_numeric(df: &mut DataFrame) -> Result<(), AppError> {
+fn try_cast_string_columns_to_numeric(df: &mut DataFrame, cli: &Cli) -> Result<(), AppError> {
     let col_names: Vec<String> = df
         .get_columns()
         .iter()
@@ -278,8 +279,8 @@ fn try_cast_string_columns_to_numeric(df: &mut DataFrame) -> Result<(), AppError
     for name in col_names {
         let s = df.column(&name)?.as_series().unwrap().clone();
         if matches!(s.dtype(), DataType::String) {
-            // Check if the column contains the `|` symbol, used as a special marker.
-            let mut has_pipe = false;
+            // Check if the column contains the special marker.
+            let mut has_marker = false;
             let mut has_numeric = false;
             let mut count = 0;
 
@@ -288,17 +289,17 @@ fn try_cast_string_columns_to_numeric(df: &mut DataFrame) -> Result<(), AppError
                 match av {
                     AnyValue::String(t) => {
                         let t = t.trim();
-                        if t == "|" {
-                            has_pipe = true;
-                        } else if let Ok(_) = t.parse::<f64>() {
+                        if t == cli.special_marker {
+                            has_marker = true;
+                        } else if t.parse::<f64>().is_ok() {
                             has_numeric = true;
                         }
                     }
                     AnyValue::StringOwned(t) => {
                         let t = t.trim();
-                        if t == "|" {
-                            has_pipe = true;
-                        } else if let Ok(_) = t.parse::<f64>() {
+                        if t == cli.special_marker {
+                            has_marker = true;
+                        } else if t.parse::<f64>().is_ok() {
                             has_numeric = true;
                         }
                     }
@@ -311,8 +312,8 @@ fn try_cast_string_columns_to_numeric(df: &mut DataFrame) -> Result<(), AppError
                 continue;
             }
 
-            // If the column contains any pipe markers, skip numeric conversion
-            if has_pipe {
+            // If the column contains any markers, skip numeric conversion
+            if has_marker {
                 continue;
             }
 
@@ -321,19 +322,21 @@ fn try_cast_string_columns_to_numeric(df: &mut DataFrame) -> Result<(), AppError
                 continue;
             }
 
-            println!("  -> Checking column '{}' for numeric conversion:", name);
-            println!(
-                "     Length: {}, Non-null count: {}, Has pipe: {}, Has numeric: {}",
-                s.len(),
-                s.len() - s.null_count(),
-                has_pipe,
-                has_numeric
-            );
+            if cli.debug {
+                println!("  -> Checking column '{}' for numeric conversion:", name);
+                println!(
+                    "     Length: {}, Non-null count: {}, Has marker: {}, Has numeric: {}",
+                    s.len(),
+                    s.len() - s.null_count(),
+                    has_marker,
+                    has_numeric
+                );
 
-            // Add some debug output about the first few values
-            println!("     First few values:");
-            for (i, av) in s.iter().take(5).enumerate() {
-                println!("     [{}]: {:?}", i, av);
+                // Add some debug output about the first few values
+                println!("     First few values:");
+                for (i, av) in s.iter().take(5).enumerate() {
+                    println!("     [{}]: {:?}", i, av);
+                }
             }
 
             // Manually trim and parse floats from string values

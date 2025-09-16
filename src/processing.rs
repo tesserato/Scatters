@@ -20,6 +20,8 @@ pub struct PlotData {
     pub x_series: Series,
     /// A list of Polars `Series` to be plotted on the Y-axis.
     pub y_series_list: Vec<Series>,
+    /// The special string used to identify vertical markers.
+    pub special_marker: String,
     /// Whether to enable dynamic Y-axis rescaling on zoom.
     pub autoscale_y: bool,
     /// Whether to enable ECharts animations.
@@ -50,18 +52,31 @@ pub struct PlotData {
 pub fn prepare_plot_data(df: DataFrame, cli: &Cli, file_path: &Path) -> Result<PlotData, AppError> {
     // 1. Print DataFrame info if debug is enabled
     if cli.debug {
-        println!("  -> DataFrame shape: {} rows × {} columns", df.height(), df.width());
+        println!(
+            "  -> DataFrame shape: {} rows × {} columns",
+            df.height(),
+            df.width()
+        );
         for col in df.get_columns() {
-            println!("  -> Column '{}': {} values, dtype: {}, non-null: {}", 
-                col.name(), col.len(), col.dtype(), col.len() - col.null_count());
+            println!(
+                "  -> Column '{}': {} values, dtype: {}, non-null: {}",
+                col.name(),
+                col.len(),
+                col.dtype(),
+                col.len() - col.null_count()
+            );
         }
     }
 
     // 2. Determine the X-axis (index) series based on priority.
     let (x_series, x_name) = select_x_series(&df, cli)?;
-    
+
     if cli.debug {
-        println!("  -> Selected X-axis column: '{}' with {} values", x_name, x_series.len());
+        println!(
+            "  -> Selected X-axis column: '{}' with {} values",
+            x_name,
+            x_series.len()
+        );
     }
 
     // 3. Determine the Y-axis series.
@@ -80,6 +95,7 @@ pub fn prepare_plot_data(df: DataFrame, cli: &Cli, file_path: &Path) -> Result<P
         title,
         x_series,
         y_series_list,
+        special_marker: cli.special_marker.clone(),
         autoscale_y: !cli.no_autoscale_y,
         animations: cli.animations,
         max_decimals: cli.max_decimals,
@@ -88,55 +104,25 @@ pub fn prepare_plot_data(df: DataFrame, cli: &Cli, file_path: &Path) -> Result<P
     })
 }
 
-/// Safely check a string series for any values containing the `|` marker.
-/// Returns false if series iteration fails or length mismatches.
-fn check_string_series_for_pipe(series: &Series, cli: &Cli) -> bool {
-    let mut count = 0;
-    let len = series.len();
-    let mut has_pipe = false;
-
-    // Only process if there are enough non-null values
-    let non_null_count = len - series.null_count();
-    if non_null_count < 1 || (non_null_count as f64 / len as f64) < 0.5 {
-        if cli.debug {
-            println!("  -> Warning: Skipping mostly null column '{}'", series.name());
-        }
-        return false;
-    }
-
-    // Count values and look for pipes
-    for (i, av) in series.iter().enumerate() {
-        count = i + 1;
-        if cli.debug && i < 5 {
-            println!("  -> Value [{}] in '{}': {:?}", i, series.name(), av);
-        }
+/// Safely check a string series for any values containing the special marker.
+/// Returns true if the marker is found.
+fn check_string_series_for_marker(series: &Series, cli: &Cli) -> bool {
+    for av in series.iter() {
         match av {
             AnyValue::String(s) => {
-                if s.trim() == "|" {
-                    has_pipe = true;
-                    break;
+                if s.trim() == cli.special_marker {
+                    return true;
                 }
             }
             AnyValue::StringOwned(s) => {
-                if s.trim() == "|" {
-                    has_pipe = true;
-                    break;
+                if s.trim() == cli.special_marker {
+                    return true;
                 }
             }
             _ => {}
         }
     }
-
-    // Check for length mismatch
-    if count != len {
-        if cli.debug {
-            println!("  -> Warning: Iterator length mismatch in '{}': expected {}, got {}",
-                series.name(), len, count);
-        }
-        false
-    } else {
-        has_pipe
-    }
+    false
 }
 
 /// Selects the X-axis series based on a predefined priority order.
@@ -207,7 +193,7 @@ fn select_x_series(df: &DataFrame, cli: &Cli) -> Result<(Series, String), AppErr
 /// Two main cases are handled:
 /// 1.  If the `--columns` flag is provided, only the specified columns are used.
 /// 2.  Otherwise, all numeric columns (excluding the selected X-axis column) are used.
-///     String columns containing the special `|` marker are also included.
+///     String columns containing the special marker are also included.
 ///
 /// # Errors
 ///
@@ -243,14 +229,18 @@ fn select_y_series(df: &DataFrame, cli: &Cli, x_name: &str) -> Result<Vec<Series
                 let series = column.as_series().unwrap();
 
                 let should_include = if let DataType::String = column.dtype() {
-                    check_string_series_for_pipe(&series, cli)
+                    check_string_series_for_marker(series, cli)
                 } else {
                     is_numeric
                 };
 
                 if should_include {
                     if cli.debug {
-                        println!("  -> Including Y-axis column '{}' ({} values)", series.name(), series.len());
+                        println!(
+                            "  -> Including Y-axis column '{}' ({} values)",
+                            series.name(),
+                            series.len()
+                        );
                     }
                     y_series_list.push(series.clone());
                 } else if cli.debug {

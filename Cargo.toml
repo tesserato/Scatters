@@ -17,7 +17,7 @@ categories = ["command-line-utilities", "visualization"]
 
 [dependencies]
 # Core data processing
-polars = { version = "0.50.0", features = [
+polars = { version = "0.51.0", features = [
     "lazy",
     "csv",
     "parquet",
@@ -49,5 +49,5 @@ chrono = { version = "0.4", default-features = false, features = ["alloc"] }
 askama = "0.14.0"
 
 # JSON serialization for embedding data in HTML/JS
-serde = { version = "1.0.224", features = ["derive"] }
+serde = { version = "1.0.225", features = ["derive"] }
 serde_json = "1.0.145"
