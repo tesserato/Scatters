@@ -401,12 +401,20 @@ fn load_audio_dataframe(path: &Path) -> Result<DataFrame, AppError> {
         let decoded = decoder.decode(&packet)?;
 
         let mut sample_buf = SampleBuffer::<f32>::new(decoded.capacity() as u64, *decoded.spec());
-        sample_buf.copy_planar_ref(decoded);
+        sample_buf.copy_interleaved_ref(decoded);
 
-        // Iterate through each channel (plane) in the decoded buffer.
-        for (channel_idx, plane) in sample_buf. {
-            // Append the samples from the current plane to the correct channel vector.
-            channels_data[channel_idx].extend_from_slice(plane);
+        // Get samples from the interleaved buffer
+        let samples = sample_buf.samples();
+        
+        // Process interleaved samples
+        for c in 0..num_channels {
+            let channel_samples: Vec<f32> = samples
+                .iter()
+                .skip(c)
+                .step_by(num_channels)
+                .copied()
+                .collect();
+            channels_data[c].extend(channel_samples);
         }
     }
 
@@ -420,7 +428,10 @@ fn load_audio_dataframe(path: &Path) -> Result<DataFrame, AppError> {
 
     // Create the 'sample_index' series.
     let indices: Vec<u32> = (0..num_samples as u32).collect();
-    let mut series_vec = vec![Series::new("sample_index", &indices)];
+    let mut column_vec = Vec::with_capacity(num_channels + 1);
+    
+    let sample_index_name: PlSmallStr = "sample_index".try_into().unwrap();
+    column_vec.push(Series::new(sample_index_name.clone(), &indices).into_frame().column(&sample_index_name)?.clone());
 
     // Create a Series for each channel's data.
     for (i, channel_samples) in channels_data.iter().enumerate() {
@@ -428,11 +439,11 @@ fn load_audio_dataframe(path: &Path) -> Result<DataFrame, AppError> {
         let mut samples = channel_samples.clone();
         samples.resize(num_samples, 0.0);
 
-        let name = format!("channel_{}", i + 1);
-        series_vec.push(Series::new(&name, samples));
+        let name: PlSmallStr = format!("channel_{}", i).try_into().unwrap();
+        column_vec.push(Series::new(name.clone(), samples).into_frame().column(&name)?.clone());
     }
 
     // Assemble the final DataFrame.
-    let df = DataFrame::new(series_vec)?;
+    let df = DataFrame::new(column_vec)?;
     Ok(df)
 }
