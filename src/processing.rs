@@ -93,6 +93,8 @@ fn select_x_series(df: &DataFrame, cli: &Cli) -> Result<(Series, String), AppErr
         let series = df
             .column(index_name)
             .map_err(|_| AppError::ColumnNotFound(index_name.clone()))?
+            .as_series()
+            .unwrap()
             .clone();
         return Ok((series, index_name.clone()));
     }
@@ -105,6 +107,8 @@ fn select_x_series(df: &DataFrame, cli: &Cli) -> Result<(Series, String), AppErr
             .ok_or(AppError::Polars(PolarsError::NoData(
                 "DataFrame is empty".into(),
             )))?
+            .as_series()
+            .unwrap()
             .clone();
         let name = series.name().to_string();
         return Ok((series, name));
@@ -112,17 +116,17 @@ fn select_x_series(df: &DataFrame, cli: &Cli) -> Result<(Series, String), AppErr
 
     // Priority 3: Audio-friendly default — use 'sample_index' if present.
     if df.get_column_names().iter().any(|&n| n == "sample_index") {
-        let series = df.column("sample_index")?.clone();
+        let series = df.column("sample_index")?.as_series().unwrap().clone();
         return Ok((series, "sample_index".to_string()));
     }
 
     // Priority 4: Auto-detect first datetime column.
-    for series in df.get_columns() {
-        if matches!(series.dtype(), DataType::Datetime(_, _) | DataType::Date) {
+    for column in df.get_columns() {
+        if matches!(column.dtype(), DataType::Datetime(_, _) | DataType::Date) {
             // Skip columns that are entirely null after casting attempts.
-            if series.null_count() < series.len() {
-                let name = series.name().to_string();
-                return Ok((series.clone(), name));
+            if column.null_count() < column.len() {
+                let name = column.name().to_string();
+                return Ok((column.as_series().unwrap().clone(), name));
             }
         }
     }
@@ -130,7 +134,7 @@ fn select_x_series(df: &DataFrame, cli: &Cli) -> Result<(Series, String), AppErr
     // Priority 5: Fallback to row numbers.
     println!("  -> Warning: No index specified and no datetime column found. Using row numbers as index.");
     let row_count = df.height() as u32;
-    let series = Series::new("row_index", (0..row_count).collect::<Vec<u32>>());
+    let series = Series::new("row_index".into(), (0..row_count).collect::<Vec<u32>>());
     Ok((series, "row_index".to_string()))
 }
 
@@ -145,7 +149,7 @@ fn select_x_series(df: &DataFrame, cli: &Cli) -> Result<(Series, String), AppErr
 ///
 /// Returns `AppError::NoNumericColumns` if no suitable Y-axis columns can be found.
 fn select_y_series(df: &DataFrame, cli: &Cli, x_name: &str) -> Result<Vec<Series>, AppError> {
-    let mut y_series_list = Vec::new();
+    let mut y_series_list: Vec<Series> = Vec::new();
 
     // Case 1: --columns flag is used.
     if let Some(columns) = &cli.columns {
@@ -153,17 +157,19 @@ fn select_y_series(df: &DataFrame, cli: &Cli, x_name: &str) -> Result<Vec<Series
             let series = df
                 .column(col_name)
                 .map_err(|_| AppError::ColumnNotFound(col_name.clone()))?
+                .as_series()
+                .unwrap()
                 .clone();
             y_series_list.push(series);
         }
     }
     // Case 2: Default - use all numeric columns and special string columns.
     else {
-        for series in df.get_columns() {
-            if series.name() != x_name {
-                let is_numeric = series.dtype().is_numeric();
-                let is_string_with_pipe = if let DataType::String = series.dtype() {
-                    series.iter().any(|av| match av {
+        for column in df.get_columns() {
+            if column.name() != x_name {
+                let is_numeric = column.dtype().is_numeric();
+                let is_string_with_pipe = if let DataType::String = column.dtype() {
+                    column.as_series().unwrap().iter().any(|av| match av {
                         AnyValue::String(s) => s.contains('|'),
                         _ => false,
                     })
@@ -172,7 +178,7 @@ fn select_y_series(df: &DataFrame, cli: &Cli, x_name: &str) -> Result<Vec<Series
                 };
 
                 if is_numeric || is_string_with_pipe {
-                    y_series_list.push(series.clone());
+                    y_series_list.push(column.as_series().unwrap().clone());
                 }
             }
         }

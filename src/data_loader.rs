@@ -6,6 +6,7 @@
 //! that appear to be numeric or datetime values into their proper types.
 
 use crate::error::AppError;
+use calamine::{open_workbook_auto, Data, DataType as Xl, Reader};
 use polars::prelude::*;
 use std::fs::File;
 use std::path::Path;
@@ -86,7 +87,7 @@ fn try_cast_string_columns_to_datetime(df: &mut DataFrame) -> Result<(), AppErro
         .collect();
 
     for name in col_names {
-        let s = df.column(&name)?.clone();
+        let s = df.column(&name)?.as_series().unwrap().clone();
         if matches!(s.dtype(), DataType::String) {
             let mut accepted = false;
             // Strategy 1: native cast
@@ -222,7 +223,7 @@ fn try_cast_string_columns_to_numeric(df: &mut DataFrame) -> Result<(), AppError
         .collect();
 
     for name in col_names {
-        let s = df.column(&name)?.clone();
+        let s = df.column(&name)?.as_series().unwrap().clone();
         if matches!(s.dtype(), DataType::String) {
             // Check if the column contains the `|` symbol, used as a special marker.
             let contains_pipe = s.iter().any(|av| match av {
@@ -244,7 +245,7 @@ fn try_cast_string_columns_to_numeric(df: &mut DataFrame) -> Result<(), AppError
                     _ => None,
                 })
                 .collect();
-            let parsed_series = Series::new(&name, parsed_vals);
+            let parsed_series = Series::new((&name).into(), parsed_vals);
 
             // Only replace if all non-null string values were successfully parsed as numeric.
             let original_non_nulls = s.len() - s.null_count();
@@ -263,8 +264,6 @@ fn try_cast_string_columns_to_numeric(df: &mut DataFrame) -> Result<(), AppError
 /// by skipping initial empty rows. All data is initially read as strings and then
 /// passed through the same type inference pipeline as other file formats.
 fn load_excel_dataframe(path: &Path) -> Result<DataFrame, AppError> {
-    use calamine::{open_workbook_auto, DataType as Xl, Reader};
-
     let mut workbook = open_workbook_auto(path)?;
     let sheet_name = workbook
         .sheet_names()
@@ -272,16 +271,14 @@ fn load_excel_dataframe(path: &Path) -> Result<DataFrame, AppError> {
         .cloned()
         .ok_or_else(|| AppError::UnsupportedFormat(path.to_string_lossy().to_string()))?;
 
-    let range = workbook
-        .worksheet_range(&sheet_name)
-        .ok_or_else(|| AppError::UnsupportedFormat(path.to_string_lossy().to_string()))??;
+    let range = workbook.worksheet_range(&sheet_name).unwrap();
 
     // Collect all rows to find the header index and maximum column count.
-    let rows: Vec<Vec<Xl>> = range.rows().map(|r| r.to_vec()).collect();
+    let rows: Vec<Vec<Data>> = range.rows().map(|r| r.to_vec()).collect();
     // Find first non-empty row to use as the header.
     let mut header_idx: Option<usize> = None;
     for (i, r) in rows.iter().enumerate() {
-        if !r.iter().all(|c| matches!(c, Xl::Empty)) {
+        if !r.iter().all(|c| matches!(c, Data::Empty | Data::Error(_))) {
             header_idx = Some(i);
             break;
         }
@@ -323,7 +320,7 @@ fn load_excel_dataframe(path: &Path) -> Result<DataFrame, AppError> {
         }
         for ci in 0..col_count {
             let val_str_opt: Option<String> = row.get(ci).and_then(|c| match c {
-                Xl::Empty | Xl::Error(_) => None,
+                Data::Empty | Data::Error(_) => None,
                 _ => Some(c.to_string()),
             });
             columns[ci].push(val_str_opt);
@@ -331,12 +328,12 @@ fn load_excel_dataframe(path: &Path) -> Result<DataFrame, AppError> {
     }
 
     // Create a Polars Series for each column and assemble the DataFrame.
-    let mut series_vec: Vec<Series> = Vec::with_capacity(col_count);
+    let mut column_vec: Vec<Column> = Vec::with_capacity(col_count);
     for (i, name) in headers.iter().enumerate() {
-        let s = Series::new(name.as_str(), &columns[i]);
-        series_vec.push(s);
+        let col = Column::new(name.into(), &columns[i]);
+        column_vec.push(col);
     }
-    let df = DataFrame::new(series_vec)?;
+    let df = DataFrame::new(column_vec)?;
     Ok(df)
 }
 
@@ -407,7 +404,7 @@ fn load_audio_dataframe(path: &Path) -> Result<DataFrame, AppError> {
         sample_buf.copy_planar_ref(decoded);
 
         // Iterate through each channel (plane) in the decoded buffer.
-        for (channel_idx, plane) in sample_buf.planes().planes().iter().enumerate() {
+        for (channel_idx, plane) in sample_buf. {
             // Append the samples from the current plane to the correct channel vector.
             channels_data[channel_idx].extend_from_slice(plane);
         }
