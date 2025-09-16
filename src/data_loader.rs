@@ -289,7 +289,7 @@ fn try_cast_string_columns_to_numeric(df: &mut DataFrame, cli: &Cli) -> Result<(
                 match av {
                     AnyValue::String(t) => {
                         let t = t.trim();
-                        if t == cli.special_marker {
+                        if t == cli.vertical_marker {
                             has_marker = true;
                         } else if t.parse::<f64>().is_ok() {
                             has_numeric = true;
@@ -297,7 +297,7 @@ fn try_cast_string_columns_to_numeric(df: &mut DataFrame, cli: &Cli) -> Result<(
                     }
                     AnyValue::StringOwned(t) => {
                         let t = t.trim();
-                        if t == cli.special_marker {
+                        if t == cli.vertical_marker {
                             has_marker = true;
                         } else if t.parse::<f64>().is_ok() {
                             has_numeric = true;

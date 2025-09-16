@@ -47,8 +47,8 @@ pub struct Cli {
 
     /// Downsample series with more than N points using the LTTB algorithm to preserve visual features.
     /// If not provided, no downsampling is performed.
-    #[arg(long)]
-    pub downsample: Option<usize>,
+    #[arg(short = 'd', long = "downsample-threshold", default_value_t = 10000)]
+    pub downsample_threshold:usize,
 
     /// Disable dynamic Y-axis autoscaling on zoom.
     /// When disabled, the Y-axis keeps its initial, globally-padded range.
@@ -67,7 +67,7 @@ pub struct Cli {
 
     /// The character (or string) to recognize as a vertical marker in string columns.
     #[arg(short = 'M', long = "special-marker", default_value_t = String::from("|"))]
-    pub special_marker: String,
+    pub vertical_marker: String,
 
     /// Threshold for ECharts `large` mode. Series with more points than this will be optimized for performance, which may reduce detail.
     #[arg(short = 'l', long = "large-mode-threshold", default_value_t = 2000)]
@@ -75,7 +75,7 @@ pub struct Cli {
 
     /// Print debug information during processing.
     /// This includes detected columns, data types, and DataFrame shape.
-    #[arg(short = 'd', long, default_value_t = false)]
+    #[arg(short = 'D', long, default_value_t = false)]
     pub debug: bool,
 
     /// Use a white (light) theme for the plot instead of the default dark theme.

@@ -70,20 +70,19 @@ pub fn prepare_plot_data(df: DataFrame, cli: &Cli, file_path: &Path) -> Result<P
     // 3. Process each series, applying downsampling if necessary.
     for y_series in y_series_list {
         let y_name = y_series.name().to_string();
-        if let Some(threshold) = cli.downsample {
-            if y_series.len() > threshold {
-                println!(
-                    "  -> Downsampling '{}' from {} to {} points...",
-                    y_name,
-                    y_series.len(),
-                    threshold
-                );
-                let (ds_x, ds_y) = downsample_series(&x_series, &y_series, threshold);
-                final_series_list.push((y_name, ds_x, ds_y));
-                downsampled = true;
-                continue;
-            }
+        if y_series.len() > cli.downsample_threshold {
+            println!(
+                "  -> Downsampling '{}' from {} to {} points...",
+                y_name,
+                y_series.len(),
+                cli.downsample_threshold
+            );
+            let (ds_x, ds_y) = downsample_series(&x_series, &y_series, cli.downsample_threshold);
+            final_series_list.push((y_name, ds_x, ds_y));
+            downsampled = true;
+            continue;
         }
+
         // If not downsampling, use the original series.
         final_series_list.push((y_name, x_series.clone(), y_series));
     }
@@ -100,7 +99,7 @@ pub fn prepare_plot_data(df: DataFrame, cli: &Cli, file_path: &Path) -> Result<P
     Ok(PlotData {
         title,
         series_list: final_series_list,
-        special_marker: cli.special_marker.clone(),
+        special_marker: cli.vertical_marker.clone(),
         autoscale_y: !cli.no_autoscale_y,
         animations: cli.animations,
         max_decimals: cli.max_decimals,
@@ -162,12 +161,12 @@ fn check_string_series_for_marker(series: &Series, cli: &Cli) -> bool {
     for av in series.iter() {
         match av {
             AnyValue::String(s) => {
-                if s.trim() == cli.special_marker {
+                if s.trim() == cli.vertical_marker {
                     return true;
                 }
             }
             AnyValue::StringOwned(s) => {
-                if s.trim() == cli.special_marker {
+                if s.trim() == cli.vertical_marker {
                     return true;
                 }
             }
