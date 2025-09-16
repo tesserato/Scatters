@@ -6,7 +6,7 @@
 //! embedded directly as JSON.
 
 use crate::error::AppError;
-use crate::processing::PlotData;
+use crate::processing::{any_value_to_f64, PlotData};
 use askama::Template;
 use polars::prelude::*;
 use serde_json::Value;
@@ -16,13 +16,14 @@ use serde_json::Value;
 /// This struct defines the data that will be passed to the `page.html` template.
 /// Each field in this struct corresponds to a variable used within the template.
 #[derive(Template)]
-#[template(path = "page.html")]
+#[template(path = "page.jinja2")]
 struct PageTemplate<'a> {
     title: &'a str,
     autoscale_y: bool,
     animations: bool,
     max_decimals: i32,
     use_white_theme: bool,
+    downsampled: bool,
     x_axis_type: &'a str,
     x_axis_label_extra: &'a str,
     y_min: f64,
@@ -44,12 +45,16 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
     let series_json_objects = build_series_json(plot_data)?;
     let series_json_str = series_json_objects.join(",");
 
-    // Determine ECharts x-axis type based on the data type of the X series.
-    let x_axis_type = match plot_data.x_series.dtype() {
-        DataType::Datetime(_, _) | DataType::Date => "time",
-        DataType::String => "category",
-        _ => "value",
-    };
+    // Determine ECharts x-axis type based on the data type of the X series from the first series pair.
+    let x_axis_type = plot_data
+        .series_list
+        .get(0)
+        .map(|(_, x_series, _)| match x_series.dtype() {
+            DataType::Datetime(_, _) | DataType::Date => "time",
+            DataType::String => "category",
+            _ => "value",
+        })
+        .unwrap_or("value");
 
     // Add a custom formatter for numeric X-axis labels.
     let x_axis_label_extra = if x_axis_type == "value" {
@@ -62,7 +67,7 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
     let (y_min, y_max) = {
         let mut min_v = f64::INFINITY;
         let mut max_v = f64::NEG_INFINITY;
-        for ys in &plot_data.y_series_list {
+        for (_, _, ys) in &plot_data.series_list {
             for val in ys.iter() {
                 if let Some(y_float) = any_value_to_f64(&val) {
                     if y_float.is_finite() {
@@ -89,6 +94,7 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
         animations: plot_data.animations,
         max_decimals: plot_data.max_decimals,
         use_white_theme: plot_data.use_white_theme,
+        downsampled: plot_data.downsampled,
         x_axis_type,
         x_axis_label_extra,
         y_min,
@@ -103,13 +109,12 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
 ///
 /// This function iterates through each Y-series, pairs its values with the corresponding
 /// X-series values, and serializes them into a JSON structure compatible with ECharts.
-/// It also handles a special case where a `|` value in a string column creates a vertical
+/// It also handles a special case where the special marker in a string column creates a vertical
 /// `markLine` in the plot instead of a data point.
 fn build_series_json(plot_data: &PlotData) -> Result<Vec<String>, AppError> {
     let mut series_objects = Vec::new();
-    let x_series = &plot_data.x_series;
 
-    for y_series in &plot_data.y_series_list {
+    for (y_name, x_series, y_series) in &plot_data.series_list {
         // Zip X and Y series into [x, y] pairs, filtering out nulls.
         let mut data_points: Vec<[Value; 2]> = Vec::new();
         let mut mark_lines_data: Vec<Value> = Vec::new();
@@ -120,9 +125,9 @@ fn build_series_json(plot_data: &PlotData) -> Result<Vec<String>, AppError> {
 
         for (x_val, y_val) in x_series.iter().zip(y_series.iter()) {
             if !matches!(x_val, AnyValue::Null) {
-                // Special handling for `|` to create a vertical markLine.
+                // Special handling for the marker to create a vertical markLine.
                 if let AnyValue::String(s) = y_val {
-                    if s == "|" {
+                    if s == plot_data.special_marker {
                         mark_lines_data.push(serde_json::json!({
                             "xAxis": any_value_to_json_value(x_val.clone()),
                             "lineStyle": { "color": "#c23531", "width": 2, "type": "solid" },
@@ -191,8 +196,8 @@ fn build_series_json(plot_data: &PlotData) -> Result<Vec<String>, AppError> {
         };
 
         // Construct the base JSON object for the series.
-        let mut series_obj = serde_json::json!({
-            "name": y_series.name(),
+        let series_obj = serde_json::json!({
+            "name": y_name,
             "type": "scatter",
             "metaN": n_points,
             "metaXMin": x_min_val,
@@ -203,17 +208,6 @@ fn build_series_json(plot_data: &PlotData) -> Result<Vec<String>, AppError> {
             "data": data_points,
             "markLine": { "data": mark_lines_data, "symbol": "none" }
         });
-
-        // Conditionally enable `large` mode for performance on large datasets.
-        if n_points > plot_data.large_mode_threshold {
-            if let Some(obj) = series_obj.as_object_mut() {
-                obj.insert("large".to_string(), Value::Bool(true));
-                obj.insert(
-                    "largeThreshold".to_string(),
-                    (plot_data.large_mode_threshold as u64).into(),
-                );
-            }
-        }
 
         let series_obj_str = serde_json::to_string(&series_obj)?;
         series_objects.push(series_obj_str);
@@ -256,35 +250,5 @@ fn any_value_to_json_value(av: AnyValue) -> Value {
             ms.into()
         }
         _ => Value::String(av.to_string()), // Fallback for other types.
-    }
-}
-
-/// Converts a Polars `AnyValue` to an `Option<f64>`.
-///
-/// This helper is used for calculating min/max ranges for axes. It returns `Some(f64)`
-/// for numeric, date, and datetime types, and `None` for all others. Dates and datetimes
-/// are converted to milliseconds since the epoch as a float. It will also attempt to
-/// parse string values into floats, ignoring common formatting like thousand separators.
-fn any_value_to_f64(av: &AnyValue) -> Option<f64> {
-    match av {
-        AnyValue::String(s) => s.trim().replace(',', "").parse::<f64>().ok(),
-        AnyValue::StringOwned(s) => s.trim().replace(',', "").parse::<f64>().ok(),
-        AnyValue::UInt8(v) => Some(*v as f64),
-        AnyValue::UInt16(v) => Some(*v as f64),
-        AnyValue::UInt32(v) => Some(*v as f64),
-        AnyValue::UInt64(v) => Some(*v as f64),
-        AnyValue::Int8(v) => Some(*v as f64),
-        AnyValue::Int16(v) => Some(*v as f64),
-        AnyValue::Int32(v) => Some(*v as f64),
-        AnyValue::Int64(v) => Some(*v as f64),
-        AnyValue::Float32(v) => Some(*v as f64),
-        AnyValue::Float64(v) => Some(*v),
-        AnyValue::Date(days) => Some((*days as i64 as f64) * 86_400_000.0),
-        AnyValue::Datetime(v, unit, _) => Some(match unit {
-            polars::prelude::TimeUnit::Nanoseconds => (*v as f64) / 1_000_000.0,
-            polars::prelude::TimeUnit::Microseconds => (*v as f64) / 1_000.0,
-            polars::prelude::TimeUnit::Milliseconds => *v as f64,
-        }),
-        _ => None,
     }
 }

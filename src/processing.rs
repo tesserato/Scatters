@@ -16,10 +16,8 @@ use std::path::Path;
 pub struct PlotData {
     /// The title of the plot.
     pub title: String,
-    /// The Polars `Series` to be used for the X-axis.
-    pub x_series: Series,
-    /// A list of Polars `Series` to be plotted on the Y-axis.
-    pub y_series_list: Vec<Series>,
+    /// A list of series to plot, each as a (name, x_series, y_series) tuple.
+    pub series_list: Vec<(String, Series, Series)>,
     /// The special string used to identify vertical markers.
     pub special_marker: String,
     /// Whether to enable dynamic Y-axis rescaling on zoom.
@@ -32,6 +30,8 @@ pub struct PlotData {
     pub use_white_theme: bool,
     /// The threshold for enabling ECharts' high-performance `large` mode.
     pub large_mode_threshold: usize,
+    /// True if any series was downsampled.
+    pub downsampled: bool,
 }
 
 /// Selects the X and Y series from a DataFrame and packages them for plotting.
@@ -50,25 +50,7 @@ pub struct PlotData {
 /// A `Result` containing a `PlotData` struct ready for the plotting engine,
 /// or an `AppError` if an appropriate X or Y series cannot be determined.
 pub fn prepare_plot_data(df: DataFrame, cli: &Cli, file_path: &Path) -> Result<PlotData, AppError> {
-    // 1. Print DataFrame info if debug is enabled
-    if cli.debug {
-        println!(
-            "  -> DataFrame shape: {} rows × {} columns",
-            df.height(),
-            df.width()
-        );
-        for col in df.get_columns() {
-            println!(
-                "  -> Column '{}': {} values, dtype: {}, non-null: {}",
-                col.name(),
-                col.len(),
-                col.dtype(),
-                col.len() - col.null_count()
-            );
-        }
-    }
-
-    // 2. Determine the X-axis (index) series based on priority.
+    // 1. Determine the X-axis (index) series based on priority.
     let (x_series, x_name) = select_x_series(&df, cli)?;
 
     if cli.debug {
@@ -79,8 +61,32 @@ pub fn prepare_plot_data(df: DataFrame, cli: &Cli, file_path: &Path) -> Result<P
         );
     }
 
-    // 3. Determine the Y-axis series.
+    // 2. Determine the Y-axis series.
     let y_series_list = select_y_series(&df, cli, &x_name)?;
+
+    let mut final_series_list = Vec::new();
+    let mut downsampled = false;
+
+    // 3. Process each series, applying downsampling if necessary.
+    for y_series in y_series_list {
+        let y_name = y_series.name().to_string();
+        if let Some(threshold) = cli.downsample {
+            if y_series.len() > threshold {
+                println!(
+                    "  -> Downsampling '{}' from {} to {} points...",
+                    y_name,
+                    y_series.len(),
+                    threshold
+                );
+                let (ds_x, ds_y) = downsample_series(&x_series, &y_series, threshold);
+                final_series_list.push((y_name, ds_x, ds_y));
+                downsampled = true;
+                continue;
+            }
+        }
+        // If not downsampling, use the original series.
+        final_series_list.push((y_name, x_series.clone(), y_series));
+    }
 
     // 4. Determine the plot title.
     let title = cli.title.clone().unwrap_or_else(|| {
@@ -93,15 +99,61 @@ pub fn prepare_plot_data(df: DataFrame, cli: &Cli, file_path: &Path) -> Result<P
 
     Ok(PlotData {
         title,
-        x_series,
-        y_series_list,
+        series_list: final_series_list,
         special_marker: cli.special_marker.clone(),
         autoscale_y: !cli.no_autoscale_y,
         animations: cli.animations,
         max_decimals: cli.max_decimals,
         use_white_theme: cli.white_theme,
         large_mode_threshold: cli.large_mode_threshold,
+        downsampled,
     })
+}
+
+/// Downsamples a pair of X/Y series using the LTTB algorithm.
+///
+/// Note: This converts the data to `f64` for processing, so original types like
+/// Datetime are lost and become numeric representations (e.g., milliseconds).
+fn downsample_series(x_series: &Series, y_series: &Series, threshold: usize) -> (Series, Series) {
+    let points: Vec<lttb::DataPoint> = x_series
+        .iter()
+        .zip(y_series.iter())
+        .filter_map(|(x_val, y_val)| {
+            if let (Some(x), Some(y)) = (any_value_to_f64(&x_val), any_value_to_f64(&y_val)) {
+                Some(lttb::DataPoint::new(x, y))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if points.is_empty() {
+        return (
+            Series::new_empty(x_series.name().clone(), &DataType::Float64),
+            Series::new_empty(y_series.name().clone(), &DataType::Float64),
+        );
+    }
+
+    let downsampled_points = lttb::lttb(points, threshold);
+
+    let mut x_builder = PrimitiveChunkedBuilder::<Float64Type>::new(
+        "x_downsampled".into(),
+        downsampled_points.len(),
+    );
+    let mut y_builder = PrimitiveChunkedBuilder::<Float64Type>::new(
+        "y_downsampled".into(),
+        downsampled_points.len(),
+    );
+
+    for p in downsampled_points {
+        x_builder.append_value(p.x);
+        y_builder.append_value(p.y);
+    }
+
+    (
+        x_builder.finish().into_series(),
+        y_builder.finish().into_series(),
+    )
 }
 
 /// Safely check a string series for any values containing the special marker.
@@ -254,5 +306,34 @@ fn select_y_series(df: &DataFrame, cli: &Cli, x_name: &str) -> Result<Vec<Series
         Err(AppError::NoNumericColumns)
     } else {
         Ok(y_series_list)
+    }
+}
+
+/// Converts a Polars `AnyValue` to an `Option<f64>`.
+///
+/// This helper is used for calculating min/max ranges for axes and for downsampling.
+/// It returns `Some(f64)` for numeric, date, and datetime types, and `None` for all others.
+/// Dates and datetimes are converted to milliseconds since the epoch as a float.
+pub fn any_value_to_f64(av: &AnyValue) -> Option<f64> {
+    match av {
+        AnyValue::String(s) => s.trim().replace(',', "").parse::<f64>().ok(),
+        AnyValue::StringOwned(s) => s.trim().replace(',', "").parse::<f64>().ok(),
+        AnyValue::UInt8(v) => Some(*v as f64),
+        AnyValue::UInt16(v) => Some(*v as f64),
+        AnyValue::UInt32(v) => Some(*v as f64),
+        AnyValue::UInt64(v) => Some(*v as f64),
+        AnyValue::Int8(v) => Some(*v as f64),
+        AnyValue::Int16(v) => Some(*v as f64),
+        AnyValue::Int32(v) => Some(*v as f64),
+        AnyValue::Int64(v) => Some(*v as f64),
+        AnyValue::Float32(v) => Some(*v as f64),
+        AnyValue::Float64(v) => Some(*v),
+        AnyValue::Date(days) => Some((*days as i64 as f64) * 86_400_000.0),
+        AnyValue::Datetime(v, unit, _) => Some(match unit {
+            polars::prelude::TimeUnit::Nanoseconds => (*v as f64) / 1_000_000.0,
+            polars::prelude::TimeUnit::Microseconds => (*v as f64) / 1_000.0,
+            polars::prelude::TimeUnit::Milliseconds => *v as f64,
+        }),
+        _ => None,
     }
 }

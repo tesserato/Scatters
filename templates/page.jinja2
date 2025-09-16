@@ -90,20 +90,25 @@
         var myChart = echarts.init(document.getElementById('main'), THEME);
         myChart.setOption({
             animation: ANIMATIONS,
-            title: { text: '{{ title }}', top: 5, textStyle: { color: TITLE_COLOR } },
-            tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, valueFormatter: formatNumber },
-            legend: { type: 'scroll', top: 30 },
-            grid: { left: '2%', right: '2%', bottom: '6%', containLabel: true },
-            toolbox: {
-                feature: {
-                    dataZoom: { yAxisIndex: 'none' },
-                    restore: {},
-                    saveAsImage: {}
-                }
-            },
-            xAxis: { type: '{{ x_axis_type }}', splitLine: { show: false }, axisLine: { lineStyle: { color: AXIS_LINE_COLOR } }, axisTick: { lineStyle: { color: AXIS_COLOR } }, axisLabel: { color: AXIS_COLOR{{ x_axis_label_extra | safe }} } },
-            yAxis: { type: 'value', axisLine: { show: true, lineStyle: { color: AXIS_LINE_COLOR } }, axisTick: { lineStyle: { color: AXIS_COLOR } }, axisLabel: { formatter: formatNumber, color: AXIS_COLOR }, min: {{ y_min | safe }}, max: {{ y_max | safe }} },
-            dataZoom: [
+            progressive: 400,
+            progressiveThreshold: 2000,
+            title: { text: '{{ title }}', left: 'center', top: 5, textStyle: { color: TITLE_COLOR } },
+            {% if downsampled %}
+        subtitle: { text: 'Data downsampled for performance. Original resolution is not shown.', left: 'center', top: 30, textStyle: { color: '#aaa', fontSize: 12 } },
+        {% endif %}
+        tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, valueFormatter: formatNumber },
+        legend: { type: 'scroll', top: 30 },
+        grid: { left: '2%', right: '2%', bottom: '6%', containLabel: true },
+        toolbox: {
+            feature: {
+                dataZoom: { yAxisIndex: 'none' },
+                restore: { },
+                saveAsImage: { }
+            }
+        },
+        xAxis: { type: '{{ x_axis_type }}', splitLine: { show: false }, axisLine: { lineStyle: { color: AXIS_LINE_COLOR } }, axisTick: { lineStyle: { color: AXIS_COLOR } }, axisLabel: { color: AXIS_COLOR{{ x_axis_label_extra | safe }} } },
+        yAxis: { type: 'value', axisLine: { show: true, lineStyle: { color: AXIS_LINE_COLOR } }, axisTick: { lineStyle: { color: AXIS_COLOR } }, axisLabel: { formatter: formatNumber, color: AXIS_COLOR }, min: {{ y_min | safe }}, max: {{ y_max | safe }} },
+        dataZoom: [
             { type: 'inside', start: 0, end: 100 },
             { type: 'slider', start: 0, end: 100, height: 40 }
         ],
@@ -128,9 +133,7 @@
             var newSeries = series.map(function (s) {
                 var n = (s.metaN != null) ? s.metaN : ((s.data && s.data.length) ? s.data.length : 1000);
                 var size = computeSize(n, pct);
-                var visibleN = Math.max(1, Math.round(n * pct));
-                var useLarge = visibleN > 5000;
-                return { symbolSize: size, large: useLarge };
+                return { symbolSize: size };
             });
 
             var updates = { series: newSeries };
@@ -156,12 +159,7 @@
                             var s = series[i];
                             if (selected && selected.hasOwnProperty && selected.hasOwnProperty(s.name) && !selected[s.name]) continue;
                             var d = s.data || [];
-                            var stride = 1;
-                            // var estimate = (typeof s.metaN === 'number' ? s.metaN : d.length) * Math.max(0, endPct - startPct);
-                            // if (estimate > 5000 && d.length > 5000) {
-                            //     stride = Math.max(1, Math.floor(estimate / 2000));
-                            // }
-                            for (var j = 0; j < d.length; j += stride) {
+                            for (var j = 0; j < d.length; j += 1) { // stride removed for now as downsampling makes it less necessary
                                 var p = d[j];
                                 var x = Array.isArray(p) ? p[0] : null;
                                 var y = Array.isArray(p) ? p[1] : null;

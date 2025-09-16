@@ -45,9 +45,10 @@ pub struct Cli {
     #[arg(short = 't', long)]
     pub title: Option<String>,
 
-    /// The character (or string) to recognize as a vertical marker in string columns.
-    #[arg(short = 'M', long = "special-marker", default_value_t = String::from("|"))]
-    pub special_marker: String,
+    /// Downsample series with more than N points using the LTTB algorithm to preserve visual features.
+    /// If not provided, no downsampling is performed.
+    #[arg(long)]
+    pub downsample: Option<usize>,
 
     /// Disable dynamic Y-axis autoscaling on zoom.
     /// When disabled, the Y-axis keeps its initial, globally-padded range.
@@ -63,6 +64,10 @@ pub struct Cli {
     /// Use -1 for an unlimited number of decimal places.
     #[arg(short = 'm', long = "max-decimals", default_value_t = 2)]
     pub max_decimals: i32,
+
+    /// The character (or string) to recognize as a vertical marker in string columns.
+    #[arg(short = 'M', long = "special-marker", default_value_t = String::from("|"))]
+    pub special_marker: String,
 
     /// Threshold for ECharts `large` mode. Series with more points than this will be optimized for performance, which may reduce detail.
     #[arg(short = 'l', long = "large-mode-threshold", default_value_t = 2000)]
