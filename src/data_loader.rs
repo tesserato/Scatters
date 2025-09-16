@@ -9,6 +9,7 @@ use crate::error::AppError;
 use calamine::{open_workbook_auto, Data, DataType as Xl, Reader};
 use polars::prelude::*;
 use std::fs::File;
+use std::io::{Cursor, Read};
 use std::path::Path;
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::DecoderOptions;
@@ -40,8 +41,57 @@ pub fn load_dataframe(path: &Path) -> Result<DataFrame, AppError> {
 
     let mut df = match extension.as_str() {
         "csv" => {
-            let file = File::open(path)?;
-            CsvReader::new(file).finish().map_err(AppError::from)?
+            // First read the file and clean up any broken records
+            let mut data = String::new();
+            File::open(path)?.read_to_string(&mut data)?;
+
+            // Split into lines
+            let lines: Vec<_> = data.lines().collect();
+            if lines.is_empty() {
+                return Err(AppError::Polars(PolarsError::NoData(
+                    "CSV file is empty".into(),
+                )));
+            }
+
+            // Get headers
+            let headers = lines[0]
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .collect::<Vec<_>>();
+            let col_count = headers.len();
+
+            // Create empty columns
+            let mut columns: Vec<Vec<Option<String>>> = vec![Vec::new(); col_count];
+
+            // Process each line
+            for line in lines.iter().skip(1) {
+                let fields: Vec<_> = line.split(',').map(|s| s.trim().to_string()).collect();
+
+                // Add each field to its column, padding with None if missing
+                for i in 0..col_count {
+                    let value = fields
+                        .get(i)
+                        .map(|field| {
+                            if field.is_empty() || field == "|" {
+                                None
+                            } else {
+                                Some(field.clone())
+                            }
+                        })
+                        .unwrap_or(None);
+                    columns[i].push(value);
+                }
+            }
+
+            // Create Polars Series for each column
+            let mut series_vec = Vec::with_capacity(col_count);
+            for (i, name) in headers.iter().enumerate() {
+                let series = Series::new(name.as_str().into(), &columns[i]);
+                series_vec.push(series.into());
+            }
+
+            // Create DataFrame
+            DataFrame::new(series_vec).map_err(AppError::from)?
         }
         "parquet" => ParquetReader::new(File::open(path)?)
             .finish()
@@ -67,7 +117,10 @@ pub fn load_dataframe(path: &Path) -> Result<DataFrame, AppError> {
     try_cast_string_columns_to_numeric(&mut df)?;
     // Next, attempt to auto-coerce remaining string columns that look like datetimes.
     try_cast_string_columns_to_datetime(&mut df)?;
-
+    // After all in-place modifications, rechunk the DataFrame to ensure
+    // all columns have a single, contiguous memory layout. This prevents
+    // iterator panics when zipping columns with different chunk counts.
+    df.rechunk_mut();
     Ok(df)
 }
 
@@ -226,17 +279,64 @@ fn try_cast_string_columns_to_numeric(df: &mut DataFrame) -> Result<(), AppError
         let s = df.column(&name)?.as_series().unwrap().clone();
         if matches!(s.dtype(), DataType::String) {
             // Check if the column contains the `|` symbol, used as a special marker.
-            let contains_pipe = s.iter().any(|av| match av {
-                AnyValue::String(t) => t.trim() == "|",
-                AnyValue::StringOwned(ref t) => t.trim() == "|",
-                _ => false,
-            });
+            let mut has_pipe = false;
+            let mut has_numeric = false;
+            let mut count = 0;
 
-            if contains_pipe {
-                continue; // Skip numeric conversion for this column.
+            for av in s.iter() {
+                count += 1;
+                match av {
+                    AnyValue::String(t) => {
+                        let t = t.trim();
+                        if t == "|" {
+                            has_pipe = true;
+                        } else if let Ok(_) = t.parse::<f64>() {
+                            has_numeric = true;
+                        }
+                    }
+                    AnyValue::StringOwned(t) => {
+                        let t = t.trim();
+                        if t == "|" {
+                            has_pipe = true;
+                        } else if let Ok(_) = t.parse::<f64>() {
+                            has_numeric = true;
+                        }
+                    }
+                    _ => {}
+                }
             }
 
-            // Manually trim and parse floats from string values.
+            // Skip if we haven't seen all values yet (iterator length mismatch)
+            if count != s.len() {
+                continue;
+            }
+
+            // If the column contains any pipe markers, skip numeric conversion
+            if has_pipe {
+                continue;
+            }
+
+            // Skip if no numeric values were found
+            if !has_numeric {
+                continue;
+            }
+
+            println!("  -> Checking column '{}' for numeric conversion:", name);
+            println!(
+                "     Length: {}, Non-null count: {}, Has pipe: {}, Has numeric: {}",
+                s.len(),
+                s.len() - s.null_count(),
+                has_pipe,
+                has_numeric
+            );
+
+            // Add some debug output about the first few values
+            println!("     First few values:");
+            for (i, av) in s.iter().take(5).enumerate() {
+                println!("     [{}]: {:?}", i, av);
+            }
+
+            // Manually trim and parse floats from string values
             let parsed_vals: Vec<Option<f64>> = s
                 .iter()
                 .map(|av| match av {
@@ -405,7 +505,7 @@ fn load_audio_dataframe(path: &Path) -> Result<DataFrame, AppError> {
 
         // Get samples from the interleaved buffer
         let samples = sample_buf.samples();
-        
+
         // Process interleaved samples
         for c in 0..num_channels {
             let channel_samples: Vec<f32> = samples
@@ -429,9 +529,14 @@ fn load_audio_dataframe(path: &Path) -> Result<DataFrame, AppError> {
     // Create the 'sample_index' series.
     let indices: Vec<u32> = (0..num_samples as u32).collect();
     let mut column_vec = Vec::with_capacity(num_channels + 1);
-    
+
     let sample_index_name: PlSmallStr = "sample_index".try_into().unwrap();
-    column_vec.push(Series::new(sample_index_name.clone(), &indices).into_frame().column(&sample_index_name)?.clone());
+    column_vec.push(
+        Series::new(sample_index_name.clone(), &indices)
+            .into_frame()
+            .column(&sample_index_name)?
+            .clone(),
+    );
 
     // Create a Series for each channel's data.
     for (i, channel_samples) in channels_data.iter().enumerate() {
@@ -440,7 +545,12 @@ fn load_audio_dataframe(path: &Path) -> Result<DataFrame, AppError> {
         samples.resize(num_samples, 0.0);
 
         let name: PlSmallStr = format!("channel_{}", i).try_into().unwrap();
-        column_vec.push(Series::new(name.clone(), samples).into_frame().column(&name)?.clone());
+        column_vec.push(
+            Series::new(name.clone(), samples)
+                .into_frame()
+                .column(&name)?
+                .clone(),
+        );
     }
 
     // Assemble the final DataFrame.
