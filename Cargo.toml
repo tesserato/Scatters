@@ -33,13 +33,13 @@ calamine = "0.30"
 symphonia = { version = "0.5.4", features = ["all-formats", "all-codecs"] }
 
 # CLI argument parsing
-clap = { version = "4.5.47", features = ["derive"] }
+clap = { version = "4.5.48", features = ["derive"] }
 
 # Filesystem traversal
 walkdir = "2.5.0"
 
 # Error handling
-anyhow = "1.0.99"
+anyhow = "1.0.100"
 thiserror = "2.0.16"
 
 # Datetime parsing
