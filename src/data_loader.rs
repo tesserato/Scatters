@@ -7,10 +7,10 @@
 
 use crate::cli::Cli;
 use crate::error::AppError;
-use calamine::{open_workbook_auto, Data, DataType as Xl, Reader};
+use calamine::{open_workbook_auto, Data, Reader};
 use polars::prelude::*;
 use std::fs::File;
-use std::io::{Cursor, Read};
+use std::io::Read;
 use std::path::Path;
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::DecoderOptions;
@@ -69,7 +69,7 @@ pub fn load_dataframe(path: &Path, cli: &Cli) -> Result<DataFrame, AppError> {
                 let fields: Vec<_> = line.split(',').map(|s| s.trim().to_string()).collect();
 
                 // Add each field to its column, padding with None if missing
-                for i in 0..col_count {
+                for (i, column) in columns.iter_mut().enumerate() {
                     let value = fields
                         .get(i)
                         .map(|field| {
@@ -80,7 +80,7 @@ pub fn load_dataframe(path: &Path, cli: &Cli) -> Result<DataFrame, AppError> {
                             }
                         })
                         .unwrap_or(None);
-                    columns[i].push(value);
+                    column.push(value);
                 }
             }
 
@@ -250,14 +250,12 @@ fn try_parse_many(s: &str, fmts: &[String]) -> Option<i64> {
                     .and_utc()
                     .timestamp_nanos_opt()
                     .unwrap_or(secs * 1_000_000_000);
-                return Some((nanos / 1_000_000) as i64);
+                return Some(((nanos / 1_000_000)));
             }
-        } else {
-            if let Ok(d) = NaiveDate::parse_from_str(s, f) {
-                let dt = d.and_hms_opt(0, 0, 0)?;
-                let secs = dt.and_utc().timestamp();
-                return Some(secs * 1000);
-            }
+        } else if let Ok(d) = NaiveDate::parse_from_str(s, f) {
+            let dt = d.and_hms_opt(0, 0, 0)?;
+            let secs = dt.and_utc().timestamp();
+            return Some(secs * 1000);
         }
     }
     None
@@ -370,7 +368,7 @@ fn load_excel_dataframe(path: &Path) -> Result<DataFrame, AppError> {
     let mut workbook = open_workbook_auto(path)?;
     let sheet_name = workbook
         .sheet_names()
-        .get(0)
+        .first()
         .cloned()
         .ok_or_else(|| AppError::UnsupportedFormat(path.to_string_lossy().to_string()))?;
 
@@ -421,12 +419,12 @@ fn load_excel_dataframe(path: &Path) -> Result<DataFrame, AppError> {
         if ri <= header_idx {
             continue; // Skip header and any rows above it.
         }
-        for ci in 0..col_count {
+        for (ci, column) in columns.iter_mut().enumerate() {
             let val_str_opt: Option<String> = row.get(ci).and_then(|c| match c {
                 Data::Empty | Data::Error(_) => None,
                 _ => Some(c.to_string()),
             });
-            columns[ci].push(val_str_opt);
+            column.push(val_str_opt);
         }
     }
 
@@ -467,7 +465,7 @@ fn load_audio_dataframe(path: &Path) -> Result<DataFrame, AppError> {
     let mut format = probed.format;
     let track = format.default_track().ok_or_else(|| {
         AppError::Symphonia(symphonia::core::errors::Error::Unsupported(
-            "No default track found".into(),
+            "No default track found",
         ))
     })?;
 
@@ -477,7 +475,7 @@ fn load_audio_dataframe(path: &Path) -> Result<DataFrame, AppError> {
         .channels
         .ok_or_else(|| {
             AppError::Symphonia(symphonia::core::errors::Error::Unsupported(
-                "Channel count is not available for the track.".into(),
+                "Channel count is not available for the track.",
             ))
         })?
         .count();
@@ -510,21 +508,21 @@ fn load_audio_dataframe(path: &Path) -> Result<DataFrame, AppError> {
         let samples = sample_buf.samples();
 
         // Process interleaved samples
-        for c in 0..num_channels {
+        for (c, channel_data) in channels_data.iter_mut().enumerate() {
             let channel_samples: Vec<f32> = samples
                 .iter()
                 .skip(c)
                 .step_by(num_channels)
                 .copied()
                 .collect();
-            channels_data[c].extend(channel_samples);
+            channel_data.extend(channel_samples);
         }
     }
 
     // --- Create DataFrame from the separated channel data ---
 
     // Determine the number of samples from the first channel.
-    let num_samples = channels_data.get(0).map_or(0, |v| v.len());
+    let num_samples = channels_data.first().map_or(0, |v| v.len());
     if num_samples == 0 {
         return Ok(DataFrame::default()); // Return an empty DataFrame if no samples.
     }
@@ -533,7 +531,7 @@ fn load_audio_dataframe(path: &Path) -> Result<DataFrame, AppError> {
     let indices: Vec<u32> = (0..num_samples as u32).collect();
     let mut column_vec = Vec::with_capacity(num_channels + 1);
 
-    let sample_index_name: PlSmallStr = "sample_index".try_into().unwrap();
+    let sample_index_name: PlSmallStr = "sample_index".into();
     column_vec.push(
         Series::new(sample_index_name.clone(), &indices)
             .into_frame()

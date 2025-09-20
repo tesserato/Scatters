@@ -48,7 +48,7 @@ pub fn generate_html_plot(plot_data: &PlotData) -> Result<String, AppError> {
     // Determine ECharts x-axis type based on the data type of the X series from the first series pair.
     let x_axis_type = plot_data
         .series_list
-        .get(0)
+        .first()
         .map(|(_, x_series, _)| match x_series.dtype() {
             DataType::Datetime(_, _) | DataType::Date => "time",
             DataType::String => "category",

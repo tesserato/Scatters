@@ -48,7 +48,7 @@ pub struct Cli {
     /// Downsample series with more than N points using the LTTB algorithm to preserve visual features.
     /// If not provided, no downsampling is performed.
     #[arg(short = 'd', long = "downsample-threshold", default_value_t = 10000)]
-    pub downsample_threshold:usize,
+    pub downsample_threshold: usize,
 
     /// Disable dynamic Y-axis autoscaling on zoom.
     /// When disabled, the Y-axis keeps its initial, globally-padded range.

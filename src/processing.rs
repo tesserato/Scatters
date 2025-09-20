@@ -204,7 +204,7 @@ fn select_x_series(df: &DataFrame, cli: &Cli) -> Result<(Series, String), AppErr
     if cli.use_first_column {
         let series = df
             .get_columns()
-            .get(0)
+            .first()
             .ok_or(AppError::Polars(PolarsError::NoData(
                 "DataFrame is empty".into(),
             )))?
