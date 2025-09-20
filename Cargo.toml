@@ -15,6 +15,14 @@ keywords = ["plot", "chart", "visualization", "cli", "data"]
 
 categories = ["command-line-utilities", "visualization"]
 
+include = [
+    "src/",
+    "templates/",
+    "Cargo.toml",
+    "README.md",
+    "LICENSE",
+]
+
 [dependencies]
 # Core data processing
 polars = { version = "0.51.0", features = [
