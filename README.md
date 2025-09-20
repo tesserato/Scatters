@@ -5,7 +5,7 @@
 
 Instantly create interactive, single-file HTML scatter plots from tabular data (CSV, Parquet, JSON, Excel) and audio formats (WAV, MP3, FLAC, OGG, M4A, AAC). Built for speed and massive datasets with optional intelligent downsampling.
 
-![Scatters Demo](demo.gif)
+![Scatters Demo](https://github.com/tesserato/Scatters/blob/main/demo.gif?raw=true)
 
 `scatters` reads common data and audio files and generates beautiful, interactive charts powered by ECharts. It works recursively on directories and saves each plot as a single `.html` file.
 
