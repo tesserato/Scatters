@@ -250,7 +250,7 @@ fn try_parse_many(s: &str, fmts: &[String]) -> Option<i64> {
                     .and_utc()
                     .timestamp_nanos_opt()
                     .unwrap_or(secs * 1_000_000_000);
-                return Some(((nanos / 1_000_000)));
+                return Some(nanos / 1_000_000);
             }
         } else if let Ok(d) = NaiveDate::parse_from_str(s, f) {
             let dt = d.and_hms_opt(0, 0, 0)?;
