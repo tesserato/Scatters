@@ -3,9 +3,9 @@
 [![crates.io](https://img.shields.io/crates/v/scatters.svg)](https://crates.io/crates/scatters)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A CLI to instantly turn tabular data and audio files into interactive, self-contained HTML scatter plots.
+Instantly create interactive, single-file HTML scatter plots from tabular data (CSV, Parquet, JSON, Excel) and audio formats (WAV, MP3, FLAC, OGG, M4A, AAC). Built for speed and massive datasets with optional intelligent downsampling.
 
-`scatters` reads CSV, JSON, Parquet, Excel, and common audio files, then generates beautiful, interactive charts powered by ECharts. It works recursively on directories and saves each plot as a single `.html` file that requires no internet connection or server to view.
+`scatters` reads common data and audio files and generates beautiful, interactive charts powered by ECharts. It works recursively on directories and saves each plot as a single `.html` file.
 
 
 
@@ -25,3 +25,4 @@ A CLI to instantly turn tabular data and audio files into interactive, self-cont
 Ensure you have the Rust toolchain installed. You can then install `scatters` using Cargo:
 ```shell
 cargo install scatters
+```
