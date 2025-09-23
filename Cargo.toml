@@ -30,8 +30,7 @@ polars = { version = "0.51.0", features = [
     "csv",
     "parquet",
     "json",
-    "dtype-datetime",
-    "dtype-date",
+    "dtype-full",
 ] }
 
 # Excel file processing
