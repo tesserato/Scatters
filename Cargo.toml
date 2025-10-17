@@ -3,6 +3,9 @@ name = "scatters"
 version = "0.0.3"
 edition = "2021"
 
+homepage = "https://github.com/tesserato/Scatters"
+repository = "https://github.com/tesserato/Scatters"
+
 authors = ["Tesserato <tesserato@hotmail.com>"]
 
 description = "A CLI to instantly turn tabular data and audio files into interactive HTML scatter plots."
@@ -15,13 +18,7 @@ keywords = ["plot", "chart", "visualization", "cli", "data"]
 
 categories = ["command-line-utilities", "visualization"]
 
-include = [
-    "src/",
-    "templates/",
-    "Cargo.toml",
-    "README.md",
-    "LICENSE",
-]
+include = ["src/", "templates/", "Cargo.toml", "README.md", "LICENSE"]
 
 [dependencies]
 # Core data processing

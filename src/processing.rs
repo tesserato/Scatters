@@ -189,6 +189,18 @@ fn check_string_series_for_marker(series: &Series, cli: &Cli) -> bool {
 ///
 /// A tuple containing the selected `Series` and its name.
 fn select_x_series(df: &DataFrame, cli: &Cli) -> Result<(Series, String), AppError> {
+    let is_audio_df = df.get_column_names().iter().any(|&n| n == "sample_index");
+
+    // For audio files, the index is non-negotiable. It's always 'sample_index'.
+    // We override any user flags and inform them.
+    if is_audio_df {
+        if cli.index.is_some() || cli.use_first_column {
+            println!("  -> Warning: --index and --use-first-column flags are ignored for audio files. Using 'sample_index' as the X-axis.");
+        }
+        let series = df.column("sample_index")?.as_series().unwrap().clone();
+        return Ok((series, "sample_index".to_string()));
+    }
+
     // Priority 1: --index flag
     if let Some(index_name) = &cli.index {
         let series = df
@@ -251,52 +263,63 @@ fn select_x_series(df: &DataFrame, cli: &Cli) -> Result<(Series, String), AppErr
 /// Returns `AppError::NoNumericColumns` if no suitable Y-axis columns can be found.
 fn select_y_series(df: &DataFrame, cli: &Cli, x_name: &str) -> Result<Vec<Series>, AppError> {
     let mut y_series_list: Vec<Series> = Vec::new();
+    let is_audio_df = df.get_column_names().iter().any(|&n| n == "sample_index");
 
     if cli.debug {
         println!("  -> Scanning columns for Y-axis data...");
     }
 
-    // Case 1: --columns flag is used.
+    // Case 1: --columns flag is used and it's NOT an audio file.
     if let Some(columns) = &cli.columns {
-        for col_name in columns {
-            if cli.debug {
-                println!("  -> Processing specified column '{}'", col_name);
+        if is_audio_df {
+            println!("  -> Warning: --columns flag is ignored for audio files. Plotting all available audio channels.");
+        } else {
+            // This is the only path where we respect --columns
+            for col_name in columns {
+                if cli.debug {
+                    println!("  -> Processing specified column '{}'", col_name);
+                }
+                let series = df
+                    .column(col_name)
+                    .map_err(|_| AppError::ColumnNotFound(col_name.clone()))?
+                    .as_series()
+                    .unwrap()
+                    .clone();
+                y_series_list.push(series);
             }
-
-            let series = df
-                .column(col_name)
-                .map_err(|_| AppError::ColumnNotFound(col_name.clone()))?
-                .as_series()
-                .unwrap()
-                .clone();
-            y_series_list.push(series);
+            // Return early if columns were specified for non-audio data.
+            return if y_series_list.is_empty() {
+                Err(AppError::NoNumericColumns)
+            } else {
+                Ok(y_series_list)
+            };
         }
     }
-    // Case 2: Default - use all numeric columns and special string columns.
-    else {
-        for column in df.get_columns() {
-            if column.name() != x_name {
-                let is_numeric = column.dtype().is_numeric();
-                let series = column.as_series().unwrap();
 
-                let should_include = if let DataType::String = column.dtype() {
-                    check_string_series_for_marker(series, cli)
-                } else {
-                    is_numeric
-                };
+    // Case 2: Default behavior for tabular data, or any audio file.
+    // Use all numeric columns and special string columns.
+    for column in df.get_columns() {
+        if column.name() != x_name {
+            let is_numeric = column.dtype().is_numeric();
+            let series = column.as_series().unwrap();
 
-                if should_include {
-                    if cli.debug {
-                        println!(
-                            "  -> Including Y-axis column '{}' ({} values)",
-                            series.name(),
-                            series.len()
-                        );
-                    }
-                    y_series_list.push(series.clone());
-                } else if cli.debug {
-                    println!("  -> Skipping column '{}'", series.name());
+            let should_include = if let DataType::String = column.dtype() {
+                check_string_series_for_marker(series, cli)
+            } else {
+                is_numeric
+            };
+
+            if should_include {
+                if cli.debug {
+                    println!(
+                        "  -> Including Y-axis column '{}' ({} values)",
+                        series.name(),
+                        series.len()
+                    );
                 }
+                y_series_list.push(series.clone());
+            } else if cli.debug {
+                println!("  -> Skipping column '{}'", series.name());
             }
         }
     }

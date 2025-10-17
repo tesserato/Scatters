@@ -81,4 +81,8 @@ pub struct Cli {
     /// Use a white (light) theme for the plot instead of the default dark theme.
     #[arg(short = 'w', long = "white-theme", default_value_t = false)]
     pub white_theme: bool,
+
+    /// Aggregate all input files into a single plot instead of generating separate plots.
+    #[arg(long, default_value_t = false)]
+    pub aggregate: bool,
 }

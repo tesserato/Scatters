@@ -12,8 +12,11 @@
 //! - `plotter`: Generates the final HTML/JavaScript plot from the prepared data.
 //! - `error`: Defines the application's custom error type.
 
+use crate::cli::Cli;
+use crate::error::AppError;
+use polars::prelude::Series;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 pub mod cli;
@@ -22,14 +25,11 @@ pub mod error;
 pub mod plotter;
 pub mod processing;
 
-use crate::cli::Cli;
-use crate::error::AppError;
-
 /// The main entry point for the application logic.
 ///
 /// This function orchestrates the entire process:
 /// 1.  It finds all supported files based on the input path (which can be a file or directory).
-/// 2.  It iterates through each file, calling `process_single_file` to handle the plotting.
+/// 2.  It then calls either the individual or aggregate processing logic based on the CLI flags.
 /// 3.  It prints progress and completion messages to the console.
 ///
 /// # Arguments
@@ -47,17 +47,105 @@ pub fn run(cli: &Cli) -> Result<(), AppError> {
         return Ok(());
     }
 
-    println!("Found {} files to process...", files_to_process.len());
+    // 2. Branch based on whether we are aggregating or not
+    if cli.aggregate {
+        run_aggregate(files_to_process, cli)?;
+    } else {
+        run_individual(files_to_process, cli)?;
+    }
 
-    // 2. Process each file
-    for file_path in files_to_process {
+    println!("Done.");
+    Ok(())
+}
+
+/// Processes each file individually, generating one plot per file.
+fn run_individual(files: Vec<PathBuf>, cli: &Cli) -> Result<(), AppError> {
+    println!("Found {} files to process...", files.len());
+    for file_path in files {
         println!("Processing '{}'...", file_path.display());
         if let Err(e) = process_single_file(&file_path, cli) {
             eprintln!("  -> Error processing file {}: {}", file_path.display(), e);
         }
     }
+    Ok(())
+}
 
-    println!("Done.");
+/// Processes all files and combines their data into a single, aggregated plot.
+fn run_aggregate(files: Vec<PathBuf>, cli: &Cli) -> Result<(), AppError> {
+    println!("Aggregating {} files into a single plot...", files.len());
+
+    let mut all_series: Vec<(String, Series, Series)> = Vec::new();
+    let mut was_downsampled = false;
+
+    for file_path in files {
+        println!(
+            "  -> Processing '{}' for aggregation...",
+            file_path.display()
+        );
+
+        match data_loader::load_dataframe(&file_path, cli) {
+            Ok(df) => match processing::prepare_plot_data(df, cli, &file_path) {
+                Ok(plot_data) => {
+                    if plot_data.downsampled {
+                        was_downsampled = true;
+                    }
+                    // Prepend filename to series names to avoid collisions
+                    let file_stem = file_path.file_stem().unwrap_or_default().to_string_lossy();
+                    for (y_name, x_series, y_series) in plot_data.series_list {
+                        let new_y_name = format!("{} - {}", file_stem, y_name);
+                        all_series.push((new_y_name, x_series, y_series));
+                    }
+                }
+                Err(e) => eprintln!(
+                    "  -> Error preparing plot data for {}: {}",
+                    file_path.display(),
+                    e
+                ),
+            },
+            Err(e) => eprintln!(
+                "  -> Error loading dataframe for {}: {}",
+                file_path.display(),
+                e
+            ),
+        }
+    }
+
+    if all_series.is_empty() {
+        println!("No plottable data found across all files.");
+        return Ok(());
+    }
+
+    // Create a final PlotData struct for the combined plot
+    let final_plot_data = processing::PlotData {
+        title: cli
+            .title
+            .clone()
+            .unwrap_or_else(|| "Aggregated Plot".to_string()),
+        series_list: all_series,
+        special_marker: cli.vertical_marker.clone(),
+        autoscale_y: !cli.no_autoscale_y,
+        animations: cli.animations,
+        max_decimals: cli.max_decimals,
+        use_white_theme: cli.white_theme,
+        large_mode_threshold: cli.large_mode_threshold,
+        downsampled: was_downsampled,
+    };
+
+    // Generate and save the single HTML file
+    let html_content = plotter::generate_html_plot(&final_plot_data)?;
+
+    let output_path = if let Some(output_dir) = &cli.output {
+        output_dir.join("aggregated_plot.html")
+    } else {
+        // Default to saving in the current working directory
+        PathBuf::from("aggregated_plot.html")
+    };
+
+    fs::create_dir_all(output_path.parent().unwrap_or(Path::new(".")))?;
+    fs::write(&output_path, html_content)?;
+
+    println!("-> Aggregated plot saved to '{}'", output_path.display());
+
     Ok(())
 }
 
