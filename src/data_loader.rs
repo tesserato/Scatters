@@ -98,6 +98,8 @@ pub fn load_dataframe(path: &Path, cli: &Cli) -> Result<DataFrame, AppError> {
 /// A column is only converted if at least 90% of its non-null values can be successfully parsed,
 /// preventing accidental conversion of columns with only a few date-like strings.
 fn try_cast_string_columns_to_datetime(df: &mut DataFrame) -> Result<(), AppError> {
+    df.rechunk_mut(); // Ensure single chunk before iterating
+
     let col_names: Vec<String> = df
         .get_columns()
         .iter()
@@ -105,7 +107,15 @@ fn try_cast_string_columns_to_datetime(df: &mut DataFrame) -> Result<(), AppErro
         .collect();
 
     for name in col_names {
-        let s = df.column(&name)?.as_series().unwrap().clone();
+        let col = df.column(&name)?;
+
+        // Try to get as series, skip if not possible
+        let Some(series) = col.as_series() else {
+            continue;
+        };
+
+        let s = series.clone().rechunk();
+
         if matches!(s.dtype(), DataType::String) {
             let mut accepted = false;
             // Strategy 1: native cast
@@ -127,6 +137,7 @@ fn try_cast_string_columns_to_datetime(df: &mut DataFrame) -> Result<(), AppErro
             }
         }
     }
+    df.rechunk_mut();
     Ok(())
 }
 
@@ -232,6 +243,8 @@ fn try_parse_many(s: &str, fmts: &[String]) -> Option<i64> {
 /// It also specifically skips columns containing the special marker character, which is reserved
 /// for creating vertical marker lines in the plot.
 fn try_cast_string_columns_to_numeric(df: &mut DataFrame, cli: &Cli) -> Result<(), AppError> {
+    
+
     let col_names: Vec<String> = df
         .get_columns()
         .iter()
@@ -239,7 +252,15 @@ fn try_cast_string_columns_to_numeric(df: &mut DataFrame, cli: &Cli) -> Result<(
         .collect();
 
     for name in col_names {
-        let s = df.column(&name)?.as_series().unwrap().clone();
+        let col = df.column(&name)?;
+
+        // Try to get as series, skip if not possible
+        let Some(series) = col.as_series() else {
+            continue;
+        };
+
+        let s = series.clone().rechunk();
+
         if matches!(s.dtype(), DataType::String) {
             // Check if the column contains the special marker.
             let mut has_marker = false;
@@ -292,6 +313,7 @@ fn try_cast_string_columns_to_numeric(df: &mut DataFrame, cli: &Cli) -> Result<(
             df.replace(&name, new_series)?;
         }
     }
+    df.rechunk_mut(); 
     Ok(())
 }
 

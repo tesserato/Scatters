@@ -49,9 +49,17 @@ pub struct PlotData {
 ///
 /// A `Result` containing a `PlotData` struct ready for the plotting engine,
 /// or an `AppError` if an appropriate X or Y series cannot be determined.
-pub fn prepare_plot_data(df: DataFrame, cli: &Cli, file_path: &Path) -> Result<PlotData, AppError> {
+pub fn prepare_plot_data(
+    mut df: DataFrame,
+    cli: &Cli,
+    file_path: &Path,
+) -> Result<PlotData, AppError> {
     // 1. Determine the X-axis (index) series based on priority.
     let (x_series, x_name) = select_x_series(&df, cli)?;
+
+    if df.column(&x_name).is_err() {
+        df.with_column(x_series.clone())?;
+    }
 
     if cli.debug {
         println!(
@@ -135,12 +143,13 @@ fn downsample_series(x_series: &Series, y_series: &Series, threshold: usize) -> 
 
     let downsampled_points = lttb::lttb(points, threshold);
 
+    // Use the original series' name for the new downsampled series.
     let mut x_builder = PrimitiveChunkedBuilder::<Float64Type>::new(
-        "x_downsampled".into(),
+        x_series.name().clone(),
         downsampled_points.len(),
     );
     let mut y_builder = PrimitiveChunkedBuilder::<Float64Type>::new(
-        "y_downsampled".into(),
+        y_series.name().clone(),
         downsampled_points.len(),
     );
 
@@ -300,13 +309,19 @@ fn select_y_series(df: &DataFrame, cli: &Cli, x_name: &str) -> Result<Vec<Series
     // Use all numeric columns and special string columns.
     for column in df.get_columns() {
         if column.name() != x_name {
-            let is_numeric = column.dtype().is_numeric();
-            let series = column.as_series().unwrap();
+            let series = match column.as_series() {
+                Some(s) => s,
+                None => {
+                    println!("  -> Skipping non-numeric column '{}'", column.name());
+                    println!("{:?}", column.list());
+                    continue;
+                }
+            };
 
             let should_include = if let DataType::String = column.dtype() {
                 check_string_series_for_marker(series, cli)
             } else {
-                is_numeric
+                column.dtype().is_numeric()
             };
 
             if should_include {
