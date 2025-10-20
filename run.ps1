@@ -1,6 +1,8 @@
 $outputFolder = "./outputs"
 $env:RUST_BACKTRACE="full"
 
+cargo clippy --fix
+
 Remove-Item -r $outputFolder
 cargo check
 write-host ""

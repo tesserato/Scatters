@@ -309,17 +309,10 @@ fn select_y_series(df: &DataFrame, cli: &Cli, x_name: &str) -> Result<Vec<Series
     // Use all numeric columns and special string columns.
     for column in df.get_columns() {
         if column.name() != x_name {
-            let series = match column.as_series() {
-                Some(s) => s,
-                None => {
-                    println!("  -> Skipping non-numeric column '{}'", column.name());
-                    println!("{:?}", column.list());
-                    continue;
-                }
-            };
+            let series = column.as_materialized_series_maintain_scalar();
 
             let should_include = if let DataType::String = column.dtype() {
-                check_string_series_for_marker(series, cli)
+                check_string_series_for_marker(&series, cli)
             } else {
                 column.dtype().is_numeric()
             };
