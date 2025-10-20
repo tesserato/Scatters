@@ -52,9 +52,9 @@ pub fn load_dataframe(path: &Path, cli: &Cli) -> Result<DataFrame, AppError> {
 
     let mut df = match extension.as_str() {
         "csv" => LazyCsvReader::new(PlPath::Local(path.into()))
-            .with_infer_schema_length(Some(100)) 
-            .with_has_header(true) 
-            .with_ignore_errors(true) 
+            // .with_infer_schema_length(Some(100))
+            .with_has_header(true)
+            // .with_ignore_errors(true)
             .finish()?
             .collect()
             .map_err(AppError::from)?,
@@ -76,16 +76,16 @@ pub fn load_dataframe(path: &Path, cli: &Cli) -> Result<DataFrame, AppError> {
             ))
         }
     };
+    df.rechunk_mut();
 
     // First, try to coerce string columns that look numeric into Float64.
     // This prevents purely numeric IDs from being misinterpreted as dates.
     try_cast_string_columns_to_numeric(&mut df, cli)?;
     // Next, attempt to auto-coerce remaining string columns that look like datetimes.
     try_cast_string_columns_to_datetime(&mut df)?;
-    // After all in-place modifications, rechunk the DataFrame to ensure
-    // all columns have a single, contiguous memory layout. This prevents
-    // iterator panics when zipping columns with different chunk counts.
-    df.rechunk_mut();
+
+    // Rechunk the DataFrame to ensure all columns have a single,
+    // contiguous memory layout. This can prevent some iterator panics.
     Ok(df)
 }
 
@@ -243,81 +243,53 @@ fn try_cast_string_columns_to_numeric(df: &mut DataFrame, cli: &Cli) -> Result<(
         if matches!(s.dtype(), DataType::String) {
             // Check if the column contains the special marker.
             let mut has_marker = false;
-            let mut has_numeric = false;
-            let mut count = 0;
+            let mut all_numeric = true;
+            let original_non_nulls = s.len() - s.null_count();
+            if original_non_nulls == 0 {
+                continue;
+            }
 
             for av in s.iter() {
-                count += 1;
                 match av {
                     AnyValue::String(t) => {
                         let t = t.trim();
                         if t == cli.vertical_marker {
                             has_marker = true;
-                        } else if t.parse::<f64>().is_ok() {
-                            has_numeric = true;
+                            break; // If we find a marker, we stop checking this column for numeric conversion
+                        }
+                        if !t.is_empty() && t.parse::<f64>().is_err() {
+                            all_numeric = false;
+                            break;
                         }
                     }
                     AnyValue::StringOwned(t) => {
                         let t = t.trim();
                         if t == cli.vertical_marker {
                             has_marker = true;
-                        } else if t.parse::<f64>().is_ok() {
-                            has_numeric = true;
+                            break;
+                        }
+                        if !t.is_empty() && t.parse::<f64>().is_err() {
+                            all_numeric = false;
+                            break;
                         }
                     }
-                    _ => {}
+                    AnyValue::Null => {}
+                    _ => {
+                        // Non-string value in a string column? Should be rare.
+                        all_numeric = false;
+                        break;
+                    }
                 }
             }
 
-            // Skip if we haven't seen all values yet (iterator length mismatch)
-            if count != s.len() {
+            // If the column contains any markers, or not all values are numeric, skip conversion.
+            if has_marker || !all_numeric {
                 continue;
             }
 
-            // If the column contains any markers, skip numeric conversion
-            if has_marker {
-                continue;
-            }
-
-            // Skip if no numeric values were found
-            if !has_numeric {
-                continue;
-            }
-
-            if cli.debug {
-                println!("  -> Checking column '{}' for numeric conversion:", name);
-                println!(
-                    "     Length: {}, Non-null count: {}, Has marker: {}, Has numeric: {}",
-                    s.len(),
-                    s.len() - s.null_count(),
-                    has_marker,
-                    has_numeric
-                );
-
-                // Add some debug output about the first few values
-                println!("     First few values:");
-                for (i, av) in s.iter().take(5).enumerate() {
-                    println!("     [{}]: {:?}", i, av);
-                }
-            }
-
-            // Manually trim and parse floats from string values
-            let parsed_vals: Vec<Option<f64>> = s
-                .iter()
-                .map(|av| match av {
-                    AnyValue::String(t) => t.trim().parse::<f64>().ok(),
-                    AnyValue::StringOwned(ref t) => t.trim().parse::<f64>().ok(),
-                    _ => None,
-                })
-                .collect();
-            let parsed_series = Series::new((&name).into(), parsed_vals);
-
-            // Only replace if all non-null string values were successfully parsed as numeric.
-            let original_non_nulls = s.len() - s.null_count();
-            let parsed_numeric_count = parsed_series.len() - parsed_series.null_count();
-            if original_non_nulls > 0 && parsed_numeric_count == original_non_nulls {
-                df.replace(&name, parsed_series).map_err(AppError::from)?;
-            }
+            // Perform the cast using Polars' robust operations.
+            let new_series = s.cast(&DataType::Float64)?;
+            df.replace(&name, new_series)?;
         }
     }
     Ok(())
