@@ -8,9 +8,19 @@
 use crate::cli::Cli;
 use crate::error::AppError;
 use calamine::{open_workbook_auto, Data, Reader};
-use polars::prelude::*;
+use polars::datatypes::DataType;
+use polars::io::SerReader;
+use polars::prelude::LazyFileListReader;
+use polars::prelude::{Column, NamedFrom};
+use polars::prelude::{ParquetReader, PlPath};
+use polars::series::IntoSeries;
+use polars::{
+    frame::DataFrame,
+    lazy::prelude::LazyCsvReader,
+    prelude::{AnyValue, Int64Chunked, JsonFormat, JsonReader, PlSmallStr, TimeUnit},
+    series::Series,
+};
 use std::fs::File;
-use std::io::Read;
 use std::path::Path;
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::DecoderOptions;
@@ -41,59 +51,13 @@ pub fn load_dataframe(path: &Path, cli: &Cli) -> Result<DataFrame, AppError> {
         .to_lowercase();
 
     let mut df = match extension.as_str() {
-        "csv" => {
-            // First read the file and clean up any broken records
-            let mut data = String::new();
-            File::open(path)?.read_to_string(&mut data)?;
-
-            // Split into lines
-            let lines: Vec<_> = data.lines().collect();
-            if lines.is_empty() {
-                return Err(AppError::Polars(PolarsError::NoData(
-                    "CSV file is empty".into(),
-                )));
-            }
-
-            // Get headers
-            let headers = lines[0]
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .collect::<Vec<_>>();
-            let col_count = headers.len();
-
-            // Create empty columns
-            let mut columns: Vec<Vec<Option<String>>> = vec![Vec::new(); col_count];
-
-            // Process each line
-            for line in lines.iter().skip(1) {
-                let fields: Vec<_> = line.split(',').map(|s| s.trim().to_string()).collect();
-
-                // Add each field to its column, padding with None if missing
-                for (i, column) in columns.iter_mut().enumerate() {
-                    let value = fields
-                        .get(i)
-                        .map(|field| {
-                            if field.is_empty() {
-                                None
-                            } else {
-                                Some(field.clone())
-                            }
-                        })
-                        .unwrap_or(None);
-                    column.push(value);
-                }
-            }
-
-            // Create Polars Series for each column
-            let mut series_vec = Vec::with_capacity(col_count);
-            for (i, name) in headers.iter().enumerate() {
-                let series = Series::new(name.as_str().into(), &columns[i]);
-                series_vec.push(series.into());
-            }
-
-            // Create DataFrame
-            DataFrame::new(series_vec).map_err(AppError::from)?
-        }
+        "csv" => LazyCsvReader::new(PlPath::Local(path.into()))
+            .with_infer_schema_length(Some(100)) 
+            .with_has_header(true) 
+            .with_ignore_errors(true) 
+            .finish()?
+            .collect()
+            .map_err(AppError::from)?,
         "parquet" => ParquetReader::new(File::open(path)?)
             .finish()
             .map_err(AppError::from)?,

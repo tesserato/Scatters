@@ -1,4 +1,5 @@
 $outputFolder = "./outputs"
+$env:RUST_BACKTRACE=1
 
 Remove-Item -r $outputFolder
 cargo check
